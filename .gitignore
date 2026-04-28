@@ -1,0 +1,23 @@
+# Environment — JANGAN DI-COMMIT
+.env
+*.env
+!.env.example
+ 
+# Node
+node_modules/
+dist/
+ 
+# CSV besar dari DS — share via Google Drive
+prisma/data/*.csv
+# Kecualikan yang kecil dan aman di-commit
+!prisma/data/skills.csv
+!prisma/data/industries.csv
+!prisma/data/companies_sample.csv
+!prisma/data/job_postings_sample.csv
+ 
+# Upload lokal (tidak dipakai — pakai Supabase Storage)
+uploads/
+ 
+# OS
+.DS_Store
+Thumbs.db

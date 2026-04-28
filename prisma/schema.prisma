@@ -1,0 +1,253 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+
+// AUTH & USER
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  profile      UserProfile?
+  cvUploads    CvUpload[]
+  matchResults MatchResult[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  headline    String?
+  location    String?
+  careerPrefs Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("user_profiles")
+}
+
+// CV UPLOAD
+// File disimpan di Supabase Storage bucket "cv-uploads"
+// fileUrl     = public URL yang bisa diakses frontend
+// storagePath = path di bucket, dipakai saat delete
+
+model CvUpload {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName      String
+  fileUrl       String?
+  storagePath   String?
+  extractedText String?   @db.Text
+  uploadedAt    DateTime  @default(now())
+
+  matchResults  MatchResult[]
+
+  @@map("cv_uploads")
+}
+
+// COMPANIES  (dari companies_sample.csv)
+// id = company_id asli dari dataset LinkedIn Job Postings
+
+model Company {
+  id                 BigInt             @id @map("company_id")
+  companyName        String?            @map("company_name")
+  companyDescription String?            @db.Text @map("companies_description")
+  companySize        Float?             @map("company_size")
+  state              String?
+  country            String?
+  city               String?
+  zipCode            BigInt?            @map("zip_code")
+  address            String?
+  url                String?
+  jobPostings    JobPosting[]
+  specialties    CompanySpecialty[]
+  industries     CompanyIndustry[]
+  employeeCounts EmployeeCount[]
+
+  @@map("companies")
+}
+
+// JOB POSTINGS  (dari job_postings_sample.csv)
+// id = job_posting_id asli dari dataset
+
+model JobPosting {
+  id                       BigInt        @id @default(autoincrement()) @map("job_posting_id")
+  companyId                BigInt?       @map("company_id")
+  company                  Company?      @relation(fields: [companyId], references: [id])
+  title                    String?
+  description              String?       @db.Text @map("job_description")
+  location                 String?
+  views                    Float?
+  formattedWorkType        String?       @map("formatted_work_type")
+  applies                  Float?
+  originalListedTime       BigInt?        @map("original_listed_time")
+  remoteAllowed            Float?        @map("remote_allowed")
+  jobPostingUrl            String?       @map("job_posting_url")
+  applicationUrl           String?       @map("application_url")
+  applicationType          String?       @map("application_type")
+  expiry                   BigInt?
+  closedTime               BigInt?        @map("closed_time")
+  formattedExperienceLevel String?       @map("formatted_experience_level")
+  skillsDesc               String?       @db.Text @map("skills_desc")
+  listedTime               BigInt?        @map("listed_time")
+  postingDomain            String?       @map("posting_domain")
+  sponsored                BigInt?
+  workType                 String?       @map("work_type")
+  
+
+  skills       JobSkill[]
+  industries   JobIndustry[]
+  salaries     Salary[]
+  benefits     Benefit[]
+  matchResults MatchResult[]
+
+  @@map("job_postings")
+}
+
+// SKILLS  (dari skills.csv — 35 baris, di-commit ke repo)
+// skillId = kode singkat: "IT", "ENG", "MRKT", dst.
+
+model Skill {
+  skillId   String     @id @map("skill_id")
+  skillName String?    @map("skill_name")
+
+  jobSkills JobSkill[]
+
+  @@map("skills")
+}
+
+model JobSkill {
+  id           BigInt     @id @map("job_skill_id")
+  jobPostingId BigInt     @map("job_posting_id")
+  skillId      String     @map("skill_id")
+  
+  jobPosting   JobPosting @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+  skill        Skill      @relation(fields: [skillId], references: [skillId], onDelete: Cascade)
+
+
+  @@map("job_skills")
+}
+
+// INDUSTRIES  (dari industries.csv — 422 baris, di-commit ke repo)
+// industryId = integer dari dataset
+
+model Industry {
+  industryId   BigInt     @id @map("industry_id")
+  industryName String?    @map("industry_name")
+
+  companies   CompanyIndustry[]
+  jobPostings JobIndustry[]
+
+  @@map("industries")
+}
+
+model CompanyIndustry {
+  id         BigInt   @id @map("company_industries_id")
+  companyId  BigInt   @map("company_id")
+  industryId BigInt   @map("industry_id")
+  
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  industry   Industry @relation(fields: [industryId], references: [industryId], onDelete: Cascade)
+
+  @@map("company_industries")
+}
+
+model JobIndustry {
+  id           BigInt     @id @map("job_industries_id")
+  jobPostingId BigInt     @map("job_posting_id")
+  industryId   BigInt     @map("industry_id")
+  
+  jobPosting   JobPosting @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+  industry     Industry   @relation(fields: [industryId], references: [industryId], onDelete: Cascade)
+
+  @@map("job_industries")
+}
+
+// SUPPLEMENTAL TABLES
+
+model CompanySpecialty {
+  id         BigInt  @id @map("company_specialities_id")
+  companyId  BigInt  @map("company_id")
+  specialty  String?
+
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_specialities")
+}
+
+model EmployeeCount {
+  id            BigInt  @id @map("employee_counts_id")
+  companyId     BigInt  @map("company_id")
+  employeeCount BigInt? @map("employee_count")
+  followerCount BigInt? @map("follower_count")
+  timeRecorded  BigInt? @map("time_recorded")
+
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("employee_counts")
+}
+
+model Salary {
+  id               BigInt     @id @map("salary_id")
+  jobPostingId     BigInt     @map("job_posting_id")
+  maxSalary        Float?     @map("max_salary")
+  medSalary        Float?     @map("med_salary")
+  minSalary        Float?     @map("min_salary")
+  payPeriod        String?    @map("pay_period")
+  currency         String?
+  compensationType String?    @map("compensation_type")
+
+  jobPosting       JobPosting @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+  @@map("salaries")
+}
+
+model Benefit {
+  id           BigInt     @id @map("benefits_id")
+  jobPostingId BigInt     @map("job_posting_id")
+  inferred     Int?
+  type         String?
+
+  jobPosting   JobPosting @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+
+  @@map("benefits")
+}
+
+// MATCH RESULTS  (output dari AI Service — aktif Minggu 4)
+// matchScore   = 0.0–1.0 dari model TensorFlow
+// skillGapJson = { "present": [], "missing": [], "required": [] }
+
+model MatchResult {
+  id           String     @id @default(uuid())
+  userId       String
+  cvUploadId   String
+  jobPostingId BigInt
+  matchScore   Float
+  skillGapJson Json?
+  createdAt    DateTime   @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cvUpload   CvUpload   @relation(fields: [cvUploadId], references: [id], onDelete: Cascade)
+  jobPosting JobPosting @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+
+  @@map("match_results")
+}
+
