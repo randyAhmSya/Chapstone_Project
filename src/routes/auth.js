@@ -1,11 +1,13 @@
 import express from "express";
 import * as ctrl from "../controllers/authController.js";
 import auth from "../middleware/auth.js";
+import * as v from "../middleware/validate.js";
+import * as lim from "../middleware/authLimite.js";
 
 const router = express.Router();
 
-router.post("/register", ctrl.register);
-router.post("/login", ctrl.login);
+router.post("/register", lim.registerLimiter, v.register, ctrl.register);
+router.post("/login", lim.loginLimiter, v.login, ctrl.login);
 router.get("/me", auth, ctrl.me);
 
 export default router;
