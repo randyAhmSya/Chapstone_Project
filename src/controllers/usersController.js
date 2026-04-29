@@ -32,7 +32,7 @@ export const getRecommendations = async (req, res) => {
                     title: true,
                     location: true,
                     remoteAllowed: true,
-                    company: { select: { companyName: true } },
+                    company: { select: { companyName: true, city: true, country: true } },
                     skills: {
                         include: { skill: { select: { skillId: true, skillName: true } } },
                     },
@@ -50,3 +50,56 @@ export const getRecommendations = async (req, res) => {
     });
     res.json({ data: results, total: results.length });
 };
+
+export const getRecommendationsById = async (req, res) => {
+    const { userId } = req.params;
+
+    if (userId !== req.user.id)
+        return res.status(403).json({
+            error: "Akses ditolak",
+        });
+
+    const results = await prisma.matchResult.findMany({
+        where: { userId: req.user.id },
+        orderBy: { matchScore: "desc" },
+        take: 10,
+        include: {
+            jobPosting: {
+                select: {
+                    id: true,
+                    title: true,
+                    location: true,
+                    remoteAllowed: true,
+                    formattedWorkType: true,
+                    formattedExperienceLevel: true,
+                    company: { select: { companyName: true, city: true, country: true } },
+                    skills: {
+                        include: { skill: { select: { skillId: true, skillName: true } } },
+                    },
+                    salaries: {
+                        select: {
+                            minSalary: true,
+                            maxSalary: true,
+                            payPeriod: true,
+                            currency: true,
+                        },
+                    },
+                },
+            },
+        },
+    });
+
+    res.json({
+        data: results,
+        total: results.length,
+    });
+};
+
+export const deleteAcount = async (req, res) => {
+    const userId = req.user.id;
+
+    await prisma.user.delete({
+        where: { id: userId },
+    })
+    res.json({ message: "Akun berhasil dihapus" });
+}

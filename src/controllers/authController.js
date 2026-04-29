@@ -79,3 +79,28 @@ export const me = async (req, res) => {
         data: user,
     });
 };
+
+export const changePassword = async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+
+    const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { passwordHash: true },
+    });
+
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok)
+        return res.status(401).json({
+            error: "password tidak benar",
+        });
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+        where: { id: req.user.id },
+        data: { passwordHash: newHash },
+    });
+
+    res.json({
+        message: "password berhasil diubah. silahkanlogin ulang",
+    });
+};
