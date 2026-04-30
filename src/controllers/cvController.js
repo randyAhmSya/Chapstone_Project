@@ -6,6 +6,27 @@ const BUCKET = "cv-uploads";
 const MIN_TEXT_LEN = 50; // minimal karakter agar teks dianggap valid
 const AI_TIMEOUT = 30_000;
 
+async function extractText(buffer) {
+    try {
+        const result = await PDFParse(buffer);
+        const text = result.text?.replace(/\s+/g, " ").trim() || "";
+
+        if (text.length < MIN_TEXT_LEN) {
+            return {
+                text: null,
+                reason:
+                    "PDF tampaknya kosong atau hasil scan gambar (tidak ada teks yang bisa diekstrak)",
+            };
+        }
+        return { text, reason: null };
+    } catch {
+        return {
+            text: null,
+            reason: "PDF tidak bisa dibaca — mungkin terproteksi atau rusak",
+        };
+    }
+}
+
 export const upload = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file CV wajib diisi" });
 
@@ -29,25 +50,9 @@ export const upload = async (req, res) => {
         .from(BUCKET)
         .getPublicUrl(storagePath);
 
-    let extractedText = null;
-    try {
-        // 1. Inisialisasi parser dengan buffer file PDF dari Multer
-        const parser = new PDFParse({ data: buffer });
-
-        // 2. Jalankan proses ekstraksi teks
-        const textResult = await parser.getText();
-
-        // 3. Wajib: Hancurkan instance setelah selesai agar tidak terjadi memory leak
-        await parser.destroy();
-
-        // 4. Ambil teksnya, bersihkan spasi kosong di awal/akhir, atau jadikan null jika kosong
-        extractedText = textResult.text?.trim() || null;
-
-        console.log("✅ Ekstraksi sukses pakai pdf-parse v2.4.5!");
-    } catch (e) {
-        console.warn("[pdf-parse] gagal ekstraksi:", e.message);
-    }
-
+    // 3. Ekstraksi teks
+    const { text: extractedText, reason: extractReason } =
+        await extractText(buffer);
     const cv = await prisma.cvUpload.create({
         data: {
             userId,
@@ -70,6 +75,7 @@ export const upload = async (req, res) => {
         data: cv,
         textExtracted: extractedText !== null,
         fileSize: size,
+        ...(extractReason && { extractWarning: extractReason }),
     });
 };
 
@@ -77,8 +83,37 @@ export const getMine = async (req, res) => {
     const list = await prisma.cvUpload.findMany({
         where: { userId: req.user.id },
         orderBy: { uploadedAt: "desc" },
-        select: { id: true, fileName: true, fileUrl: true, uploadedAt: true },
+        select: {
+            id: true,
+            fileName: true,
+            fileUrl: true,
+            uploadedAt: true,
+            extractedText: false,
+        },
     });
+
+    // Tambahkan flag apakah sudah ada teks atau belum
+    const withStatus = await prisma.cvUpload.findMany({
+        where: { userId: req.user.id },
+        orderBy: { uploadedAt: "desc" },
+        select: {
+            id: true,
+            fileName: true,
+            fileUrl: true,
+            uploadedAt: true,
+            extractedText: true,
+        },
+    });
+
+    const result = withStatus.map((cv) => ({
+        id: cv.id,
+        fileName: cv.fileName,
+        fileUrl: cv.fileUrl,
+        uploadedAt: cv.uploadedAt,
+        textExtracted:
+            cv.extractedText !== null && cv.extractedText.length >= MIN_TEXT_LEN,
+    }));
+
     res.json({ data: list, total: list.length });
 };
 
@@ -92,7 +127,14 @@ export const getOne = async (req, res) => {
         return res.status(403).json({
             error: "Anda tidak memiliki akses ke CV ini",
         });
-    res.json({ data: cv });
+    res.json({
+        data: {
+            ...cv,
+            textExtracted:
+                cv.extractedText !== null && cv.extractedText.length >= MIN_TEXT_LEN,
+            textLength: cv.extractedText?.length || 0,
+        },
+    });
 };
 
 export const remove = async (req, res) => {
@@ -219,3 +261,43 @@ export const analyze = async (req, res) => {
         },
     });
 };
+
+function buildFallbackAnalysis(cv_Text, job) {
+    const cvLower = cv_Text.toLowerCase();
+    const required = job.skills.map((s) => ({
+        id: s.skill.skillId,
+        name: s.skill.skillName,
+    }));
+
+    const present = required.filter(
+        (s) =>
+            cvLower.includes(s.name.toLowerCase()) ||
+            cvLower.includes(s.id.toLowerCase()),
+    );
+
+    const missing = required.filter(
+        (s) =>
+            !cvLower.includes(s.name.toLowerCase()) &&
+            !cvLower.includes(s.id.toLowerCase()),
+    );
+
+    const score =
+        required.length > 0
+            ? parseFloat((present.length / required.length).toFixed(2))
+            : 0;
+
+    return {
+        match_score: score,
+        skill_gap: {
+            note: "Analisis fallback — AI Service belum aktif (Minggu 4)",
+            present: present.map((s) => s.id),
+            missing: missing.map((s) => s.id),
+            required: required.map((s) => s.id),
+        },
+        suggestions: missing.map((s) => ({
+            skill: s.name,
+            action: `Pelajari ${s.name} untuk meningkatkan kesesuaian dengan posisi ini`,
+        })),
+        summary: `Dari ${required.length} skill yang dibutuhkan, CV ini memenuhi ${present.length} skill (${Math.round(score * 100)}% match).`,
+    };
+}

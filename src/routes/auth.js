@@ -9,5 +9,13 @@ const router = express.Router();
 router.post("/register", lim.registerLimiter, v.register, ctrl.register);
 router.post("/login", lim.loginLimiter, v.login, ctrl.login);
 router.get("/me", auth, ctrl.me);
+router.post("/logout", auth, ctrl.logout);
+router.put(
+    "/change-password",
+    auth,
+    v.changePassword,
+    lim.changePassword,
+    ctrl.changePassword,
+);
 
 export default router;

@@ -8,8 +8,11 @@ const router = express.Router();
 router.use(auth);
 
 router.post("/upload", upload.single("cv"), ctrl.upload);
+router.post("/analyze", ctrl.analyze);
 router.get("/", ctrl.getMine);
 router.get("/:id", ctrl.getOne);
 router.delete("/:id", ctrl.remove);
+
+router.post("/:id/re-extract", ctrl.reExtract);
 
 export default router;

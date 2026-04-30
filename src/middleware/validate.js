@@ -50,6 +50,7 @@ export const login = (req, res, next) => {
     next();
 };
 
+//validasi change password
 export const changePassword = (req, res, next) => {
     let { currentPassword, newPassword } = req.body;
 
@@ -67,6 +68,56 @@ export const changePassword = (req, res, next) => {
             "Password baru tidak boleh sama dengan password saat ini",
             "newPassword",
         );
+
+    next();
+};
+
+//profil validator
+export const updateProfile = (req, res, next) => {
+    const { headline, location, careerPrefs } = req.body;
+
+    if (headline && typeof headline !== "string")
+        return fail(res, "Headline harus berupa teks", "headline");
+    if (headline && headline.length > 200)
+        return fail(res, "Headline maksimal 200 karakter", "headline");
+
+    if (location && typeof location !== "string")
+        return fail(res, "Location harus berupa teks", "location");
+    if (location && location.length > 100)
+        return fail(res, "Location maksimal 100 karakter", "location");
+
+    if (careerPrefs && typeof careerPrefs !== "object")
+        return fail(res, "careerPrefs harus berupa object JSON", "careerPrefs");
+
+    // Sanitasi
+    if (headline) req.body.headline = headline.trim();
+    if (location) req.body.location = location.trim();
+
+    next();
+};
+
+//analize validator
+export const analizeCv = (req, res, next) => {
+    const { cvUploadId, jobPostingId } = req.body;
+
+    if (!cvUploadId) return fail(res, "cvUploadId wajib diisi", "cvUploadId");
+    if (typeof cvUploadId !== "string" || cvUploadId.trim() === "")
+        return fail(res, "cvUploadId tidak valid", "cvUploadId");
+
+    if (!jobPostingId)
+        return fail(res, "jobPostingId wajib diisi", "jobPostingId");
+
+    next();
+};
+
+//match validator
+export const runMatch = (req, res, next) => {
+    const { cvUploadId, jobPostingId } = req.body;
+
+    if (!cvUploadId || !jobPostingId)
+        return fail(res, "cvUploadId wajib diisi", "cvUploadId");
+    if (typeof cvUploadId !== "string" || cvUploadId.trim() === "")
+        return fail(res, "cvUploadId tidak valid", "cvUploadId");
 
     next();
 };

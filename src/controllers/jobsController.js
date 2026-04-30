@@ -104,8 +104,12 @@ export const getSkills = async (req, res) => {
 };
 
 export const getIndustries = async (req, res) => {
+    const { search } = req.query;
+    const where = search
+        ? { industryName: { contains: search, mode: "insensitive" } }
+        : { industryName: { not: null } };
     const industries = await prisma.industry.findMany({
-        where: { industryName: { not: null } },
+        where,
         orderBy: { industryName: "asc" },
     });
     res.json({ data: industries });
