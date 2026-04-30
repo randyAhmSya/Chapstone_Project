@@ -5,6 +5,7 @@ const router = express.Router();
 
 router.get("/", ctrl.getAll);
 router.get("/skills", ctrl.getSkills);
+router.get("/stats", ctrl.getStats);
 router.get("/industries", ctrl.getIndustries);
 router.get("/:id", ctrl.getOne);
 

@@ -132,3 +132,97 @@ export const getOne = async (req, res) => {
         return res.status(404).json({ error: "Job posting tidak di temukan" });
     res.json({ data: job });
 };
+
+export const getStats = async (req, res) => {
+    const [
+        totalJobs,
+        totalCompanies,
+        remoteJobs,
+        topSkills,
+        topIndustries,
+        experienceLevels,
+        workTypes,
+    ] = await prisma.all([
+        prisma.jobPosting.count(),
+        prisma.company.count(),
+        prisma.jobPosting.count({ where: { remoteAllowed: { gt: 0 } } }),
+
+        prisma.jobPosting.groupBy({
+            by: ["skillId"],
+            _count: { skillId: true },
+            orderBy: { _count: { skillId: "desc" } },
+            take: 10,
+        }),
+
+        prisma.jobIndustry.groupBy({
+            by: ["industryId"],
+            _count: { industryId: true },
+            orderBy: { _count: { industryId: "desc" } },
+            take: 10,
+        }),
+
+        prisma.jobPosting.groupBy({
+            by: ["formattedExperienceLevel"],
+            _count: { formattedExperienceLevel: true },
+            where: { formattedExperienceLevel: { not: null } },
+            orderBy: { _count: { formattedExperienceLevel: "desc" } },
+        }),
+
+        prisma.jobPosting.groupBy({
+            by: ["formattedWorkType"],
+            _count: { formattedWorkType: true },
+            where: { formattedWorkType: { not: null } },
+            orderBy: { _count: { formattedWorkType: "desc" } },
+        }),
+    ]);
+    const skillIds = topSkills.map((s) => s.skillId);
+    const skillNames = await prisma.skill.findMany({
+        where: { skillId: { in: skillIds } },
+        select: { skillId: true, skillName: true },
+    });
+    const skillMap = Object.fromEntries(
+        skillNames.map((s) => [s.skillId, s.skillName]),
+    );
+
+    const indIds = topIndustries.map((i) => i.industryId).filter(Boolean);
+    const indNames = await prisma.industry.findMany({
+        where: { industryId: { in: indIds } },
+        select: { industryId: true, industryName: true },
+    });
+    const indMap = Object.fromEntries(
+        indNames.map((i) => [i.industryId, i.industryName]),
+    );
+
+    res.json({
+        data: {
+            summary: {
+                totalJobs,
+                totalCompanies,
+                remoteJobs,
+                remotePercentage:
+                    totalJobs > 0 ? Math.round((remoteJobs / totalJobs) * 100) : 0,
+            },
+            topSkills: topSkills.map((s) => ({
+                skillId: s.skillId,
+                skillName: skillMap[s.skillId] || s.skillId,
+                count: s._count.skillId,
+            })),
+
+            topIndustries: topIndustries.map((i) => ({
+                industryId: i.industryId,
+                industryName: indMap[i.industryId] || String(i.industryId),
+                count: i._count.industryId,
+            })),
+
+            experienceLevels: experienceLevels.map((e) => ({
+                level: e.formattedExperienceLevel,
+                count: e._count.formattedExperienceLevel,
+            })),
+
+            workTypes: workTypes.map((w) => ({
+                type: w.formattedWorkType,
+                count: w._count.formattedWorkType,
+            })),
+        },
+    });
+};

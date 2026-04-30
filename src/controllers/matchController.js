@@ -1,5 +1,8 @@
 import prisma from "../config/prisma.js";
 
+const AI_TIMEOUT = 30_000;
+const MIN_TEXT_LEN = 50;
+
 export const run = async (req, res) => {
     const { cvUploadId, jobPostingId } = req.body;
     const userId = req.user.id;
