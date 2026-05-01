@@ -104,3 +104,15 @@ export const changePassword = async (req, res) => {
         message: "password berhasil diubah. silahkanlogin ulang",
     });
 };
+
+export const logout = async (req, res) => {
+    // Update updatedAt user sebagai tanda aktivitas terakhir
+    await prisma.user.update({
+        where: { id: req.user.id },
+        data: { updatedAt: new Date() },
+    });
+
+    res.json({
+        message: "Logout berhasil. Hapus token dari penyimpanan lokal.",
+    });
+};

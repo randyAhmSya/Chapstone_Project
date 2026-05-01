@@ -12,7 +12,7 @@ router.put("/profile", v.updateProfile, ctrl.updateProfile);
 router.get("/recommendations", ctrl.getRecommendations);
 router.delete("/account", ctrl.deleteAcount);
 
-router.get("/:userId/recommendations", ctrl.getRecommendationsByUserId);
+router.get("/:userId/recommendations", ctrl.getRecommendationsById);
 router.get("/:userId/cvs", ctrl.getCvsByUserId);
 
 export default router;
