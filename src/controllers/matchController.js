@@ -131,7 +131,7 @@ export const getOne = async (req, res) => {
     res.json({ data: result });
 };
 
-exports.getHistory = async (req, res) => {
+export const getHistory = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(20, parseInt(req.query.limit) || 10);
     const skip = (page - 1) * limit;

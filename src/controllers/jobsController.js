@@ -19,7 +19,7 @@ export const getAll = async (req, res) => {
         where.location = { contains: location, mode: "insensitive" };
     }
     if (remote === "true") {
-        where.remoteAllowed = 10;
+        where.remoteAllowed = { gt: 0 };
     }
     if (level) {
         where.experienceLevel = { contains: level, mode: "insensitive" };
@@ -53,6 +53,7 @@ export const getAll = async (req, res) => {
             select: {
                 id: true,
                 title: true,
+                description: true,
                 location: true,
                 remoteAllowed: true,
                 workType: true,
@@ -146,12 +147,12 @@ export const getStats = async (req, res) => {
         topIndustries,
         experienceLevels,
         workTypes,
-    ] = await prisma.all([
+    ] = await Promise.all([
         prisma.jobPosting.count(),
         prisma.company.count(),
         prisma.jobPosting.count({ where: { remoteAllowed: { gt: 0 } } }),
 
-        prisma.jobPosting.groupBy({
+        prisma.jobSkill.groupBy({
             by: ["skillId"],
             _count: { skillId: true },
             orderBy: { _count: { skillId: "desc" } },
