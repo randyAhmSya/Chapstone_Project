@@ -51,6 +51,37 @@ export const getRecommendations = async (req, res) => {
     res.json({ data: results, total: results.length });
 };
 
+// Ambil daftar CV milik userId (hanya milik sendiri)
+export const getCvsByUserId = async (req, res) => {
+    const { userId } = req.params;
+
+    if (userId !== req.user.id) {
+        return res.status(403).json({ error: "Akses ditolak" });
+    }
+
+    const cvs = await prisma.cvUpload.findMany({
+        where: { userId },
+        orderBy: { uploadedAt: "desc" },
+        select: {
+            id: true,
+            fileName: true,
+            fileUrl: true,
+            uploadedAt: true,
+            extractedText: true,
+        },
+    });
+
+    const result = cvs.map((cv) => ({
+        id: cv.id,
+        fileName: cv.fileName,
+        fileUrl: cv.fileUrl,
+        uploadedAt: cv.uploadedAt,
+        textExtracted: cv.extractedText !== null && cv.extractedText.length >= 50,
+    }));
+
+    res.json({ data: result, total: result.length });
+};
+
 export const getRecommendationsById = async (req, res) => {
     const { userId } = req.params;
 
@@ -100,6 +131,6 @@ export const deleteAcount = async (req, res) => {
 
     await prisma.user.delete({
         where: { id: userId },
-    })
+    });
     res.json({ message: "Akun berhasil dihapus" });
-}
+};
