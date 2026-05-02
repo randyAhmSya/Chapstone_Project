@@ -14,7 +14,7 @@ router.put(
     "/change-password",
     auth,
     v.changePassword,
-    lim.changePassword,
+    lim.changePasswordLimiter,
     ctrl.changePassword,
 );
 

@@ -121,3 +121,12 @@ export const runMatch = (req, res, next) => {
 
     next();
 };
+
+export default {
+    register,
+    login,
+    changePassword,
+    updateProfile,
+    analizeCv,
+    runMatch,
+};

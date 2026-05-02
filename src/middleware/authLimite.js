@@ -39,3 +39,9 @@ export const changePasswordLimiter = rateLimit({
     },
     keyGenerator: (req) => `changePassword: ${ipKeyGenerator(req)}`,
 });
+
+export default {
+    loginLimiter,
+    registerLimiter,
+    changePasswordLimiter,
+};
