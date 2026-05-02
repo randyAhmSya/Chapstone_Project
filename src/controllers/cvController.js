@@ -8,7 +8,12 @@ const AI_TIMEOUT = 30_000;
 
 async function extractText(buffer) {
     try {
-        const result = await PDFParse(buffer);
+        const parser = new PDFParse({ data: buffer });
+
+        const result = await parser.getText();
+
+        await parser.destroy();
+
         const text = result.text?.replace(/\s+/g, " ").trim() || "";
 
         if (text.length < MIN_TEXT_LEN) {
@@ -18,6 +23,7 @@ async function extractText(buffer) {
                     "PDF tampaknya kosong atau hasil scan gambar (tidak ada teks yang bisa diekstrak)",
             };
         }
+        console.log("Ekstraksi sukses pakai pdf-parse v2.4.5!");
         return { text, reason: null };
     } catch {
         return {
@@ -80,41 +86,42 @@ export const upload = async (req, res) => {
 };
 
 export const getMine = async (req, res) => {
-    const list = await prisma.cvUpload.findMany({
-        where: { userId: req.user.id },
-        orderBy: { uploadedAt: "desc" },
-        select: {
-            id: true,
-            fileName: true,
-            fileUrl: true,
-            uploadedAt: true,
-            extractedText: false,
-        },
-    });
+    try {
+        const userId = req.user.id;
 
-    // Tambahkan flag apakah sudah ada teks atau belum
-    const withStatus = await prisma.cvUpload.findMany({
-        where: { userId: req.user.id },
-        orderBy: { uploadedAt: "desc" },
-        select: {
-            id: true,
-            fileName: true,
-            fileUrl: true,
-            uploadedAt: true,
-            extractedText: true,
-        },
-    });
+        // 1. Cukup SATU query untuk mengambil data metadata + pengecekan teks
+        const cvs = await prisma.cvUpload.findMany({
+            where: { userId },
+            orderBy: { uploadedAt: "desc" },
+            select: {
+                id: true,
+                fileName: true,
+                fileUrl: true,
+                uploadedAt: true,
+                extractedText: true, // Kita ambil hanya untuk dicek di memori
+            },
+        });
 
-    const result = withStatus.map((cv) => ({
-        id: cv.id,
-        fileName: cv.fileName,
-        fileUrl: cv.fileUrl,
-        uploadedAt: cv.uploadedAt,
-        textExtracted:
-            cv.extractedText !== null && cv.extractedText.length >= MIN_TEXT_LEN,
-    }));
+        // 2. Transformasi data: Buat status ekstraksi dan BUANG teks aslinya (Privasi)
+        const formattedData = cvs.map((cv) => ({
+            id: cv.id,
+            fileName: cv.fileName,
+            fileUrl: cv.fileUrl,
+            uploadedAt: cv.uploadedAt,
+            // Status boolean tanpa membocorkan isi teks (Efisiensi data)
+            textExtracted:
+                cv.extractedText !== null && cv.extractedText.length >= MIN_TEXT_LEN,
+        }));
 
-    res.json({ data: list, total: list.length });
+        // 3. Kirim hasil yang sudah diformat (bukan 'list' yang lama)
+        res.json({
+            data: formattedData,
+            total: formattedData.length,
+        });
+    } catch (error) {
+        console.error("[CV getMine Error]:", error.message);
+        res.status(500).json({ error: "Gagal mengambil daftar CV" });
+    }
 };
 
 export const getOne = async (req, res) => {
@@ -168,7 +175,7 @@ export const reExtract = async (req, res) => {
     }
     const buffer = Buffer.from(await fileData.arrayBuffer());
     const { text: extractedText, reason: extractReason } =
-        await extractedText(buffer);
+        await extractText(buffer);
 
     if (!extractedText) {
         return res.status(422).json({
@@ -178,7 +185,7 @@ export const reExtract = async (req, res) => {
     }
 
     await prisma.cvUpload.update({
-        error: { id: cv.id },
+        where: { id: cv.id },
         data: {
             extractedText,
         },
