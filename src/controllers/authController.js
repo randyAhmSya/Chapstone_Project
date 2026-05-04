@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
+import { R } from "../utils/response.js";
 // import { token } from "morgan";
 
 const makeToken = (userId) => {
@@ -15,16 +16,18 @@ const makeToken = (userId) => {
     );
 };
 
+const userSelect = { id: true, email: true, name: true, createdAt: true };
+
 export const register = async (req, res) => {
     const { email, password, name } = req.body;
 
     if (!email || !password)
-        return res.status(400).json({ error: "email and password wajib diisi" });
+        return R.badRequest(res, "email and password wajib diisi");
     if (password.length < 8)
-        return res.status(400).json({ error: "password minimal harus 8 karakter" });
+        return R.badRequest(res, "password minimal harus 8 karakter");
 
     const exists = await prisma.user.findUnique({ where: { email } });
-    if (exists) return res.status(409).json({ error: "email sudah terdaftar" });
+    if (exists) return R.fail(res, 409, "email sudah terdaftar");
 
     const passwordHash = await bcrypt.hash(password, 12);
 
@@ -42,23 +45,26 @@ export const register = async (req, res) => {
             createdAt: true,
         },
     });
-    res.status(201).json({ token: makeToken(user.id), user });
+    res.status(201).json({
+        message: "User berhasil didaftarkan",
+        token: makeToken(user.id),
+        user,
+    });
 };
 
 export const login = async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password)
-        return res.status(400).json({ error: "email and password wajib diisi" });
+        return R.unauthorized(res, "email and password wajib diisi");
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user)
-        return res.status(401).json({ error: "email atau password salah" });
+    if (!user) return R.unauthorized(res, "email atau password salah");
 
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    if (!isPasswordValid)
-        return res.status(401).json({ error: "email atau password salah" });
+    if (!isPasswordValid) return R.unauthorized(res, "email atau password salah");
 
     res.json({
+        message: "Login berhasil",
         token: makeToken(user.id),
         user: { id: user.id, email: user.email, name: user.name },
     });
@@ -75,9 +81,7 @@ export const me = async (req, res) => {
             profile: true,
         },
     });
-    res.json({
-        data: user,
-    });
+    R.ok(res, user);
 };
 
 export const changePassword = async (req, res) => {
@@ -89,10 +93,7 @@ export const changePassword = async (req, res) => {
     });
 
     const ok = await bcrypt.compare(currentPassword, user.passwordHash);
-    if (!ok)
-        return res.status(401).json({
-            error: "password tidak benar",
-        });
+    if (!ok) return R.unauthorized(res, "password saat ini tidak benar");
 
     const newHash = await bcrypt.hash(newPassword, 12);
     await prisma.user.update({
@@ -100,9 +101,7 @@ export const changePassword = async (req, res) => {
         data: { passwordHash: newHash },
     });
 
-    res.json({
-        message: "password berhasil diubah. silahkanlogin ulang",
-    });
+    R.ok(res, null, "password berhasil di ubah silahkan login ulang");
 };
 
 export const logout = async (req, res) => {
@@ -112,7 +111,5 @@ export const logout = async (req, res) => {
         data: { updatedAt: new Date() },
     });
 
-    res.json({
-        message: "Logout berhasil. Hapus token dari penyimpanan lokal.",
-    });
+    R.ok(res, null, "Logout berhasil, hapus token di penyimpanan lokal");
 };
