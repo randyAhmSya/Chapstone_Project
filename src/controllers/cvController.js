@@ -1,37 +1,8 @@
-import { PDFParse } from "pdf-parse";
 import prisma from "../config/prisma.js";
 import supabase from "../config/supabase.js";
-
-const BUCKET = "cv-uploads";
-const MIN_TEXT_LEN = 50; // minimal karakter agar teks dianggap valid
-const AI_TIMEOUT = 30_000;
-
-async function extractText(buffer) {
-    try {
-        const parser = new PDFParse({ data: buffer });
-
-        const result = await parser.getText();
-
-        await parser.destroy();
-
-        const text = result.text?.replace(/\s+/g, " ").trim() || "";
-
-        if (text.length < MIN_TEXT_LEN) {
-            return {
-                text: null,
-                reason:
-                    "PDF tampaknya kosong atau hasil scan gambar (tidak ada teks yang bisa diekstrak)",
-            };
-        }
-        console.log("Ekstraksi sukses pakai pdf-parse v2.4.5!");
-        return { text, reason: null };
-    } catch {
-        return {
-            text: null,
-            reason: "PDF tidak bisa dibaca — mungkin terproteksi atau rusak",
-        };
-    }
-}
+import pdfsrv from "../service/pdfServices.js";
+import R from "../utils/response.js";
+import storageSrv from "../service/storageService.js";
 
 export const upload = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file CV wajib diisi" });
@@ -41,45 +12,55 @@ export const upload = async (req, res) => {
     const safeName = originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
     const storagePath = `${userId}/${Date.now()}_${safeName}`;
 
-    const { error: upErr } = await supabase.storage
-        .from(BUCKET)
-        .upload(storagePath, buffer, {
-            contentType: "application/pdf",
-            upsert: false,
-        });
-    if (upErr) {
-        console.error("[storage] upload error:", upErr.message);
-        return res.status(500).json({ error: "gagal upload ke storage" });
+    // upload ke supabase storage
+    let publicUrl;
+    try {
+        const result = await storageSrv.uploadCv(storagePath, buffer);
+        publicUrl = result.publicUrl;
+    } catch (err) {
+        console.error("[storage] upload error:", err.message);
+        return R.serverError(res, "gagal upload ke storage");
     }
-
-    const { data: urlData } = supabase.storage
-        .from(BUCKET)
-        .getPublicUrl(storagePath);
 
     // 3. Ekstraksi teks
     const { text: extractedText, reason: extractReason } =
-        await extractText(buffer);
-    const cv = await prisma.cvUpload.create({
-        data: {
-            userId,
-            fileName: originalname,
-            fileUrl: urlData.publicUrl,
-            storagePath,
-            extractedText,
-        },
-        select: {
-            id: true,
-            fileName: true,
-            fileUrl: true,
-            uploadedAt: true,
-            extractedText: true,
-        },
-    });
+        await pdfsrv.extractTextFromBuffer(buffer);
+
+    let cv;
+
+    try {
+        cv = await prisma.cvUpload.create({
+            data: {
+                userId,
+                fileName: originalname,
+                fileUrl: urlData.publicUrl,
+                storagePath,
+                extractedText,
+            },
+            select: {
+                id: true,
+                fileName: true,
+                fileUrl: true,
+                uploadedAt: true,
+                extractedText: true,
+            },
+        });
+    } catch (dbErr) {
+        console.error(
+            "[CV Upload] DB insert gagal, rolling back storage:",
+            dbErr.message,
+        );
+        await storageSrv.deleteCv(storagePath);
+        return R.serverError(res, "gagal upload ke storage");
+    }
 
     res.status(201).json({
         message: "CV berhasil diupload",
-        data: cv,
-        textExtracted: extractedText !== null,
+        data: {
+            ...cv,
+            textExtracted: pdfsrv.isTextValid(cv.extractedText),
+        },
+
         fileSize: size,
         ...(extractReason && { extractWarning: extractReason }),
     });

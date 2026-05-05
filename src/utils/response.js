@@ -32,7 +32,7 @@ const notFound = (res, error) => fail(res, 404, error);
 const unprocessable = (res, error, hint) => fail(res, 422, error, hint);
 const serverError = (res, error) => fail(res, 500, error);
 
-export {
+export default {
     ok,
     pagination,
     created,

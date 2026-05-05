@@ -44,4 +44,8 @@ const downloadCv = async (storagePath) => {
     return Buffer.from(await data.arrayBuffer());
 };
 
-export { uploadCv };
+export default {
+    uploadCv,
+    deleteCv,
+    downloadCv,
+};
