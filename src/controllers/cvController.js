@@ -3,6 +3,8 @@ import supabase from "../config/supabase.js";
 import pdfsrv from "../service/pdfServices.js";
 import R from "../utils/response.js";
 import storageSrv from "../service/storageService.js";
+import skillGapSrv from "../services/skillGapServices.js"
+import aiServices from "../services/aiServices.js";
 
 export const upload = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file CV wajib diisi" });
@@ -66,116 +68,88 @@ export const upload = async (req, res) => {
     });
 };
 
+
 export const getMine = async (req, res) => {
-    try {
-        const userId = req.user.id;
+    const cvs = await prisma.cvUpload.findMany({
+        where: { userId: req.user.id },
+        orderBy: { uploadedAt: "desc" },
+        select: {
+            id: true,
+            fileName: true,
+            fileUrl: true,
+            uploadedAt: true,
+            extractedText: true,
+        },
+    });
 
-        // 1. Cukup SATU query untuk mengambil data metadata + pengecekan teks
-        const cvs = await prisma.cvUpload.findMany({
-            where: { userId },
-            orderBy: { uploadedAt: "desc" },
-            select: {
-                id: true,
-                fileName: true,
-                fileUrl: true,
-                uploadedAt: true,
-                extractedText: true, // Kita ambil hanya untuk dicek di memori
-            },
-        });
-
-        // 2. Transformasi data: Buat status ekstraksi dan BUANG teks aslinya (Privasi)
-        const formattedData = cvs.map((cv) => ({
-            id: cv.id,
-            fileName: cv.fileName,
-            fileUrl: cv.fileUrl,
-            uploadedAt: cv.uploadedAt,
-            // Status boolean tanpa membocorkan isi teks (Efisiensi data)
-            textExtracted:
-                cv.extractedText !== null && cv.extractedText.length >= MIN_TEXT_LEN,
-        }));
-
-        // 3. Kirim hasil yang sudah diformat (bukan 'list' yang lama)
-        res.json({
-            data: formattedData,
-            total: formattedData.length,
-        });
-    } catch (error) {
-        console.error("[CV getMine Error]:", error.message);
-        res.status(500).json({ error: "Gagal mengambil daftar CV" });
-    }
+    const data = cvs.map(cv => ({
+        id: cv.id,
+        fileName: cv.fileName,
+        fileUrl: cv.fileUrl,
+        uploadedAt: cv.uploadedAt,
+        textExtracted: pdfsrv.isTextValid(cv.extractedText),
+    }))
+    
+    return R.ok(res, data);
 };
 
 export const getOne = async (req, res) => {
     const cv = await prisma.cvUpload.findUnique({ where: { id: req.params.id } });
     if (!cv)
-        return res.status(404).json({
-            error: "CV tidak ditemukan",
-        });
+        return R.notFound(res, "CV tidak ditemukan");
     if (cv.userId !== req.user.id)
-        return res.status(403).json({
-            error: "Anda tidak memiliki akses ke CV ini",
-        });
-    res.json({
-        data: {
-            ...cv,
-            textExtracted:
-                cv.extractedText !== null && cv.extractedText.length >= MIN_TEXT_LEN,
-            textLength: cv.extractedText?.length || 0,
-        },
-    });
+        return R.forbidden(res, "Anda tidak memiliki akses ke CV ini");
+    
+    return R.ok(res, {
+        ...cv,
+        textExtracted: pdfsrv.isTextValid(cv.extractedText),
+        textLength: cv.extractedText?.length || 0,
+    })
 };
+
+
 
 export const remove = async (req, res) => {
     const cv = await prisma.cvUpload.findUnique({ where: { id: req.params.id } });
-    if (!cv) return res.status(404).json({ error: "CV tidak ditemukan" });
+    if (!cv) return R.notFound(res, "CV tidak ditemukan");
     if (cv.userId !== req.user.id)
-        return res.status(403).json({ error: "Akses ditolak" });
+        return R.forbidden(res, "Akses ditolak");
 
-    const { error } = await supabase.storage
-        .from(BUCKET)
-        .remove([cv.storagePath]);
-    if (error) console.warn("[storage] delete warning:", error.message);
+    await storageSrv.deleteCv(cv.storagePath);
 
     await prisma.cvUpload.delete({ where: { id: req.params.id } });
-    res.json({ message: "CV berhasil dihapus" });
+    return R.ok(res, "CV berhasil dihapus");
 };
+
 
 // POST /api/cv/:id/re-extract — coba ekstraksi ulang
 // jika pertama kali upload pdf-parse gagal
 export const reExtract = async (req, res) => {
     const cv = await prisma.cvUpload.findUnique({ where: { id: req.params.id } });
-    if (!cv) return res.status(404).json({ error: "CV tidak ditemukan" });
+    if (!cv) return R.notFound(res, "CV tidak ditemukan");
     if (cv.userId !== req.user.id)
-        return res.status(403).json({ error: "Akses ditolak" });
+        return R.forbidden(res, "Akses ditolak");
 
-    const { data: fileData, error: dlErr } = await supabase.storage
-        .from(BUCKET)
-        .download(cv.storagePath);
-    if (dlErr || !fileData) {
-        return res.status(500).json({ error: "gagal download file CV" });
+    let buffer;
+    try {
+        buffer = await storageSrv.download(cv.storagePath);
+    } catch (err) {
+        return R.serverError(res, "Gagal mengunduh file CV");
     }
-    const buffer = Buffer.from(await fileData.arrayBuffer());
-    const { text: extractedText, reason: extractReason } =
-        await extractText(buffer);
+
+    const { text: extractedText, reason: extractReason } = await pdfsrv.extractTextFromBuffer(buffer);
 
     if (!extractedText) {
-        return res.status(422).json({
-            error: "CV belum di ekstrak",
-            reason: extractReason,
-        });
+        return R.unprocessable(res, 'gagal mengekstrak teks dari pdf', extractReason);
     }
 
+    //update
     await prisma.cvUpload.update({
         where: { id: cv.id },
-        data: {
-            extractedText,
-        },
+        data: { extractedText }
     });
-
-    res.json({
-        message: "CV berhasil di ekstrak ulang",
-        textLength: extractedText.length,
-    });
+    
+    return R.ok(res, { textLength: extractedText.length }, 'Teks berhasil diekstrak ulang')
 };
 
 export const analyze = async (req, res) => {
@@ -184,12 +158,11 @@ export const analyze = async (req, res) => {
 
     //validasi
     const cv = await prisma.cvUpload.findUnique({ where: { id: cvUploadId } });
-    if (!cv) return res.status(404).json({ error: "CV tidak ditemukan" });
+    if (!cv) return R.notFound(res, "CV tidak ditemukan");
     if (cv.userId !== userId)
-        return res.status(403).json({ error: "Akses ditolak" });
+        return R.forbidden(res, "Akses ditolak");
     if (!cv.extractedText || cv.extractedText.length < MIN_TEXT_LEN) {
-        return res.status(422).json({
-            error: "Teks CV belum tersedia atau terlalu pendek",
+        return R.unprocessable(res, "Teks CV belum tersedia atau terlalu pendek", {
             hint: "Coba upload ulang atau gunakan POST /api/cv/:id/re-extract",
         });
     }
@@ -202,90 +175,44 @@ export const analyze = async (req, res) => {
         },
     });
     if (!job)
-        return res.status(404).json({ error: "Job posting tidak ditemukan" });
+        return R.notFound(res, "Job posting tidak ditemukan");
 
-    let aiResult = null;
+    const jobSkills = skillGapSrv.extractJobSkills(job)
+    const jobSkillIds = jobSkills.map(s => s.skillId)
+
+    let aiResult;
     let aiOnline = false;
 
     try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT);
-
-        const aiRes = await fetch(`${process.env.AI_SERVICE_URL}/analyze`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                cv_text: cv.extractedText,
-                job_description: job.jobDescription || "",
-                job_title: job.title || "",
-                skills_desc: job.skillsDesc || "",
-                required_skills: job.skills.map((s) => s.skill.skillId),
-            }),
-            signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
-
-        if (!aiRes.ok) throw new Error(`AI Service HTTP ${aiRes.status}`);
-        aiResult = await aiRes.json();
+        const aiRaw = await aiServices.analyze(cv.extractedText, job, jobSkillIds)
         aiOnline = true;
+        aiResult = {
+            matchScore:  aiRaw.match_score  ?? 0,
+            skillGap:    aiRaw.skill_gap    ?? null,
+            suggestions: aiRaw.suggestions  ?? [],
+            summary:     aiRaw.summary      ?? null,
+        }
     } catch (err) {
         console.warn("[CV analyze] AI Service tidak tersedia:", err.message);
 
-        aiResult = buildFallbackAnalysis(cv.extractedText, job);
+        const fallback = skillGapSrv.computeFallBackGap(cv.extractedText.jobSkills)
+        aiResult = {
+            matchScore:  fallback.matchScore,
+            skillGap:    fallback.skillGapJson,
+            suggestions: fallback.suggestions,
+            summary:     fallback.summary,
+        }
     }
 
     res.json({
         message: "analisis selesai",
         aiOnline,
         data: {
-            cvId: cv.id,
-            jobId: job.id,
+            cvId:     cv.id,
+            jobId:    job.id,
             jobTitle: job.title,
-            matchScore: aiResult.match_score ?? aiResult.matchScore ?? 0,
-            skillGap: aiResult.skill_gap ?? aiResult.skillGap ?? null,
-            suggestions: aiResult.suggestions ?? [],
-            summary: aiResult.summary ?? null,
+            ...aiResult,
         },
     });
 };
 
-function buildFallbackAnalysis(cv_Text, job) {
-    const cvLower = cv_Text.toLowerCase();
-    const required = job.skills.map((s) => ({
-        id: s.skill.skillId,
-        name: s.skill.skillName,
-    }));
-
-    const present = required.filter(
-        (s) =>
-            cvLower.includes(s.name.toLowerCase()) ||
-            cvLower.includes(s.id.toLowerCase()),
-    );
-
-    const missing = required.filter(
-        (s) =>
-            !cvLower.includes(s.name.toLowerCase()) &&
-            !cvLower.includes(s.id.toLowerCase()),
-    );
-
-    const score =
-        required.length > 0
-            ? parseFloat((present.length / required.length).toFixed(2))
-            : 0;
-
-    return {
-        match_score: score,
-        skill_gap: {
-            note: "Analisis fallback — AI Service belum aktif (Minggu 4)",
-            present: present.map((s) => s.id),
-            missing: missing.map((s) => s.id),
-            required: required.map((s) => s.id),
-        },
-        suggestions: missing.map((s) => ({
-            skill: s.name,
-            action: `Pelajari ${s.name} untuk meningkatkan kesesuaian dengan posisi ini`,
-        })),
-        summary: `Dari ${required.length} skill yang dibutuhkan, CV ini memenuhi ${present.length} skill (${Math.round(score * 100)}% match).`,
-    };
-}
