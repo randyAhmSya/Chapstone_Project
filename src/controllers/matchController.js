@@ -1,19 +1,23 @@
 import prisma from "../config/prisma.js";
+import R from "../utils/response.js";
+import { parsePagination, buildMeta } from "../utils/pagination.js"
+import { DEFAULT_MATCH_LIMIT,MAX_MATCH_LIMIT } from "../utils/constants.js"
+import pdfSvc from "../services/pdfServices.js"
+import aiSvc from "../services/aiServices.js"
+import skillGapSvc from "../services/skillGapServices.js"
 
-const AI_TIMEOUT = 30_000;
-const MIN_TEXT_LEN = 50;
-
+// POST /api/match
 export const run = async (req, res) => {
     const { cvUploadId, jobPostingId } = req.body;
     const userId = req.user.id;
 
     // Validasi CV
     const cv = await prisma.cvUpload.findUnique({ where: { id: cvUploadId } });
-    if (!cv) return res.status(404).json({ error: "CV tidak ditemukan" });
+    if (!cv) return R.notFound(res, "CV tidak ditemukan");
     if (cv.userId !== userId)
-        return res.status(403).json({ error: "Akses ditolak" });
+        return R.forbidden(res, "Akses ditolak");
     if (!cv.extractedText || cv.extractedText.length < MIN_TEXT_LEN) {
-        return res.status(422).json({
+        return R.unprocessable(res, {
             error: "Teks CV belum tersedia atau terlalu pendek",
             hint: "Gunakan POST /api/cv/:id/re-extract untuk mencoba ulang ekstraksi teks",
         });
@@ -22,14 +26,18 @@ export const run = async (req, res) => {
     // Validasi job
     const jobId = parseInt(jobPostingId);
     if (isNaN(jobId))
-        return res.status(400).json({ error: "jobPostingId harus berupa angka" });
+        return R.badRequest(res, "jobPostingId harus berupa angka");
 
     const job = await prisma.jobPosting.findUnique({
         where: { id: jobId },
         include: { skills: { include: { skill: true } } },
     });
     if (!job)
-        return res.status(404).json({ error: "Job posting tidak ditemukan" });
+        return R.notFound(res, "Job posting tidak ditemukan");
+
+    //menyiapkan skill yang dipaai ai atau fallback
+    const jobSkills = skillGapSvc.extractJobSkills(job)
+    const jobSkillIds = jobSkills.map(s => s.skillId)
 
     // Kirim ke AI Service
     let matchScore = 0;
@@ -37,55 +45,16 @@ export const run = async (req, res) => {
     let aiOnline = false;
 
     try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT);
-
-        const aiRes = await fetch(`${process.env.AI_SERVICE_URL}/predict`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                cv_text: cv.extractedText,
-                job_description: job.jobDescription || "",
-                job_title: job.title || "",
-                skills_desc: job.skillsDesc || "",
-                required_skills: job.skills.map((s) => s.skill.skillId),
-            }),
-            signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (!aiRes.ok) throw new Error(`AI Service HTTP ${aiRes.status}`);
-
-        const aiData = await aiRes.json();
+        const aiData = await aiSvc.predict(cv.extractedText, job, jobSkillIds);
         matchScore = aiData.match_score ?? 0;
         skillGapJson = aiData.skill_gap ?? null;
         aiOnline = true;
     } catch (err) {
         console.warn("[Match] AI Service tidak tersedia:", err.message);
-        // Fallback berbasis keyword matching
-        const cvLower = cv.extractedText.toLowerCase();
-        const required = job.skills.map((s) => s.skill);
-        const present = required.filter(
-            (s) =>
-                cvLower.includes(s.skillName.toLowerCase()) ||
-                cvLower.includes(s.skillId.toLowerCase()),
-        );
-        const missing = required.filter(
-            (s) =>
-                !cvLower.includes(s.skillName.toLowerCase()) &&
-                !cvLower.includes(s.skillId.toLowerCase()),
-        );
-
-        matchScore =
-            required.length > 0
-                ? parseFloat((present.length / required.length).toFixed(2))
-                : 0;
-        skillGapJson = {
-            note: "Analisis fallback — AI Service belum aktif (aktif Minggu 4)",
-            present: present.map((s) => s.skillId),
-            missing: missing.map((s) => s.skillId),
-            required: required.map((s) => s.skillId),
-        };
+        // Fallback logika terpusat di skillGapService
+        const fallback = skillGapSvc.computeFallBackGap(cv.extractedText, jobSkills);
+        matchScore = fallback.matchScore;
+        skillGapJson = fallback.skillGapJson;
     }
     // Simpan hasil ke DB
     const result = await prisma.matchResult.create({
@@ -108,6 +77,7 @@ export const run = async (req, res) => {
     });
 };
 
+// GET /api/match/history
 export const getOne = async (req, res) => {
     const result = await prisma.matchResult.findUnique({
         where: { id: req.params.id },
@@ -125,16 +95,14 @@ export const getOne = async (req, res) => {
         },
     });
     if (!result)
-        return res.status(404).json({ error: "Hasil matching tidak ditemukan" });
+        return R.notFound(res, "Hasil matching tidak ditemukan");
     if (result.userId !== req.user.id)
-        return res.status(403).json({ error: "Akses ditolak" });
-    res.json({ data: result });
+        return R.forbidden(res, "Akses ditolak");
+    return R.ok(res, { data: result });
 };
 
 export const getHistory = async (req, res) => {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(20, parseInt(req.query.limit) || 10);
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePagination(req.query, DEFAULT_MATCH_LIMIT, MAX_MATCH_LIMIT);
 
     const [results, total] = await Promise.all([
         prisma.matchResult.findMany({
@@ -158,8 +126,10 @@ export const getHistory = async (req, res) => {
         prisma.matchResult.count({ where: { userId: req.user.id } }),
     ]);
 
-    res.json({
-        data: results,
-        meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
-    });
+    return R.pagination(res, results, buildMeta(total, page, limit));
+
+    // res.json({
+    //     data: results,
+    //     meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    // });
 };
