@@ -1,4 +1,6 @@
-import { rateLimit, ipKeyGenerator } from "express-rate-limit";
+import { rateLimit} from "express-rate-limit";
+
+const getIp = (req) => req.ip || req.socket?.remoteAddress || "unknown";
 
 // Rate limit LOGIN — 10 percobaan per 15 menit per IP
 export const loginLimiter = rateLimit({
@@ -10,7 +12,7 @@ export const loginLimiter = rateLimit({
         error: "terlalu banyak percobaan untuk login. coba lagi setelah 15 menit",
     },
     keyGenerator: (req) => {
-        const ip = ipKeyGenerator(req);
+        const ip = getIp(req);
         const email = (req.body.email || "").toLowerCase().trim();
         return `login: ${ip}-${email}`;
     },
@@ -25,7 +27,7 @@ export const registerLimiter = rateLimit({
         error:
             "terlalu banyak percobaan untuk register. coba lagi setelah 15 menit",
     },
-    keyGenerator: (req) => `register: ${ipKeyGenerator(req)}`,
+    keyGenerator: (req) => `register: ${getIp(req)}`,
 });
 
 export const changePasswordLimiter = rateLimit({
@@ -37,7 +39,7 @@ export const changePasswordLimiter = rateLimit({
         error:
             "terlalu banyak percobaan untuk ubah password. coba lagi setelah 15 menit",
     },
-    keyGenerator: (req) => `changePassword: ${ipKeyGenerator(req)}`,
+    keyGenerator: (req) => `changePassword: ${getIp(req)}`,
 });
 
 export default {
