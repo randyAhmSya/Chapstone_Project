@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
-import { R } from "../utils/response.js";
+import R from "../utils/response.js";
 // import { token } from "morgan";
 
 const makeToken = (userId) => {

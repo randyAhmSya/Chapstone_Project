@@ -5,7 +5,7 @@
 // - Error handling storage terpusat dan konsisten
 // - Mudah di-mock saat unit testing
 
-import { supabase } from "../config/supabase.js";
+import supabase from "../config/supabase.js";
 import { CV_BUCKET } from "../utils/constants.js";
 
 // - upload buffer ke supabase storage

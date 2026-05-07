@@ -1,8 +1,7 @@
 import prisma from "../config/prisma.js";
-import supabase from "../config/supabase.js";
-import pdfsrv from "../service/pdfServices.js";
+import pdfsrv from "../services/pdfServices.js";
 import R from "../utils/response.js";
-import storageSrv from "../service/storageService.js";
+import storageSrv from "../services/storageService.js";
 import skillGapSrv from "../services/skillGapServices.js"
 import aiServices from "../services/aiServices.js";
 

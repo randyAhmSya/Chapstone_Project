@@ -1,11 +1,12 @@
 import prisma from "../config/prisma.js";
+import R from "../utils/response.js";
+import { parsePagination, buildMeta } from "../utils/pagination.js"
+import { DEFAULT_JOB_LIMIT, MAX_JOB_LIMIT } from "../utils/constants.js"
 
 export const getAll = async (req, res) => {
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(50, parseInt(req.query.limit) || 20);
-    const skip = (page - 1) * limit;
+    const {page, limit, skip} = parsePagination(req.query, DEFAULT_JOB_LIMIT, MAX_JOB_LIMIT)
 
-    const { search, location, skill, industry, remote, level } = req.query;
+    const { search, location, skill, industry, remote, level, company } = req.query;
 
     const where = {};
 
@@ -13,19 +14,21 @@ export const getAll = async (req, res) => {
         where.OR = [
             { title: { contains: search, mode: "insensitive" } },
             { description: { contains: search, mode: "insensitive" } },
+            { skillsDesc: { contains: search, mode: "insensitive" } }
         ];
     }
-    if (location) {
+    if (location) 
         where.location = { contains: location, mode: "insensitive" };
-    }
-    if (remote === "true") {
+    
+    if (remote === "true") 
         where.remoteAllowed = { gt: 0 };
-    }
-    if (level) {
-        where.experienceLevel = { contains: level, mode: "insensitive" };
-    }
+    
+    if (level) 
+        where.formattedExperienceLevel = { contains: level, mode: "insensitive" };
+    
+    if(company) where.company = { companyName: { contains: company, mode: "insensitive" } };
 
-    if (skill) {
+    if (skill) 
         where.skills = {
             some: {
                 skill: {
@@ -33,8 +36,8 @@ export const getAll = async (req, res) => {
                 },
             },
         };
-    }
-    if (industry) {
+    
+    if (industry) 
         where.industries = {
             some: {
                 industry: {
@@ -42,7 +45,7 @@ export const getAll = async (req, res) => {
                 },
             },
         };
-    }
+    
 
     const [jobs, total] = await Promise.all([
         prisma.jobPosting.findMany({
@@ -53,19 +56,20 @@ export const getAll = async (req, res) => {
             select: {
                 id: true,
                 title: true,
-                description: true,
                 location: true,
                 remoteAllowed: true,
-                workType: true,
                 formattedWorkType: true,
                 formattedExperienceLevel: true,
+                applies: true,
                 listedTime: true,
+                sponsored: true,
                 company: {
                     select: {
                         id: true,
                         companyName: true,
                         city: true,
                         country: true,
+                        companySize: true,
                     },
                 },
                 skills: {
@@ -91,17 +95,14 @@ export const getAll = async (req, res) => {
         }),
         prisma.jobPosting.count({ where }),
     ]);
-    res.json({
-        data: jobs,
-        meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
-    });
+    return R.pagination(res, jobs, buildMeta(total, page, limit));
 };
 
 export const getSkills = async (req, res) => {
     const skills = await prisma.skill.findMany({
         orderBy: { skillName: "asc" },
     });
-    res.json({ data: skills });
+    return R.ok(res, skills);
 };
 
 export const getIndustries = async (req, res) => {
@@ -113,18 +114,17 @@ export const getIndustries = async (req, res) => {
         where,
         orderBy: { industryName: "asc" },
     });
-    res.json({ data: industries });
+    return R.ok(res, industries);
 };
 
 export const getOne = async (req, res) => {
-    let jobId;
-    try {
-        jobId = BigInt(req.params.id);
-    } catch (e) {
-        return res.status(400).json({ error: "Format ID pekerjaan tidak valid" });
-    }
+    
+    const id = parseInt(req.params.id);
+
+    if(isNaN(id)) return R.badRequest(res, "Invalid job ID");
+
     const job = await prisma.jobPosting.findUnique({
-        where: { id: jobId },
+        where: { id: id },
         include: {
             company: true,
             skills: { include: { skill: true } },
@@ -134,9 +134,10 @@ export const getOne = async (req, res) => {
         },
     });
     if (!job)
-        return res.status(404).json({ error: "Job posting tidak di temukan" });
-    res.json({ data: job });
+        return R.notFound(res, "Job posting tidak di temukan");
+    return R.ok(res, job);
 };
+
 
 export const getStats = async (req, res) => {
     const [
@@ -180,54 +181,47 @@ export const getStats = async (req, res) => {
             orderBy: { _count: { formattedWorkType: "desc" } },
         }),
     ]);
-    const skillIds = topSkills.map((s) => s.skillId);
-    const skillNames = await prisma.skill.findMany({
-        where: { skillId: { in: skillIds } },
+
+    // Resolve nama skill & industri secara paralel
+    const [skillNames, indNames] = await Promise.all([
+        prisma.skill.findMany({
+        where:  { skillId: { in: topSkillsRaw.map(s => s.skillId) } },
         select: { skillId: true, skillName: true },
-    });
-    const skillMap = Object.fromEntries(
-        skillNames.map((s) => [s.skillId, s.skillName]),
-    );
-
-    const indIds = topIndustries.map((i) => i.industryId).filter(Boolean);
-    const indNames = await prisma.industry.findMany({
-        where: { industryId: { in: indIds } },
+        }),
+        prisma.industry.findMany({
+        where:  { industryId: { in: topIndustriesRaw.map(i => i.industryId).filter(Boolean) } },
         select: { industryId: true, industryName: true },
-    });
-    const indMap = Object.fromEntries(
-        indNames.map((i) => [i.industryId, i.industryName]),
-    );
+        }),
+    ])
 
-    res.json({
-        data: {
-            summary: {
-                totalJobs,
-                totalCompanies,
-                remoteJobs,
-                remotePercentage:
-                    totalJobs > 0 ? Math.round((remoteJobs / totalJobs) * 100) : 0,
-            },
-            topSkills: topSkills.map((s) => ({
-                skillId: s.skillId,
-                skillName: skillMap[s.skillId] || s.skillId,
-                count: s._count.skillId,
-            })),
+    const skillMap = Object.fromEntries(skillNames.map(s => [s.skillId, s.skillName]))
+    const indMap   = Object.fromEntries(indNames.map(i => [i.industryId, i.industryName]))
 
-            topIndustries: topIndustries.map((i) => ({
-                industryId: i.industryId,
-                industryName: indMap[i.industryId] || String(i.industryId),
-                count: i._count.industryId,
-            })),
-
-            experienceLevels: experienceLevels.map((e) => ({
-                level: e.formattedExperienceLevel,
-                count: e._count.formattedExperienceLevel,
-            })),
-
-            workTypes: workTypes.map((w) => ({
-                type: w.formattedWorkType,
-                count: w._count.formattedWorkType,
-            })),
+    return R.ok(res, {
+        summary: {
+        totalJobs,
+        totalCompanies,
+        remoteJobs,
+        remotePercentage: totalJobs > 0 ? Math.round((remoteJobs / totalJobs) * 100) : 0,
         },
-    });
+        topSkills: topSkillsRaw.map(s => ({
+        skillId:   s.skillId,
+        skillName: skillMap[s.skillId] || s.skillId,
+        count:     s._count.skillId,
+        })),
+        topIndustries: topIndustriesRaw.map(i => ({
+        industryId:   i.industryId,
+        industryName: indMap[i.industryId] || String(i.industryId),
+        count:        i._count.industryId,
+        })),
+        experienceLevels: experienceLevels.map(e => ({
+        level: e.formattedExperienceLevel,
+        count: e._count.formattedExperienceLevel,
+        })),
+        workTypes: workTypes.map(w => ({
+        type:  w.formattedWorkType,
+        count: w._count.formattedWorkType,
+        })),
+    })
+
 };

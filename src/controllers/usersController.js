@@ -1,7 +1,7 @@
 import prisma from "../config/prisma.js";
 import R from "../utils/response.js";
 import { MAX_RECOMMENDATIONS } from "../utils/constants.js";
-import pdfSvc from "../services/pdfService.js";
+import pdfSvc from "../services/pdfServices.js";
 
 const RECOMMENDATION_INCLUDE = {
   jobPosting: {
