@@ -3,7 +3,6 @@
 
 import { PDFParse } from "pdf-parse";
 import { CV_MIN_TEXT_LEN } from "../utils/constants.js";
-import { text } from "express";
 
 // Ekstrak teks dari Buffer PDF
 // Selalu mengembalikan objek — tidak pernah throw ke luar

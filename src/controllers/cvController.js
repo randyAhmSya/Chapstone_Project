@@ -4,6 +4,7 @@ import R from "../utils/response.js";
 import storageSrv from "../services/storageService.js";
 import skillGapSrv from "../services/skillGapServices.js"
 import aiServices from "../services/aiServices.js";
+import { CV_MIN_TEXT_LEN } from "../utils/constants.js";
 
 export const upload = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file CV wajib diisi" });
@@ -34,7 +35,7 @@ export const upload = async (req, res) => {
             data: {
                 userId,
                 fileName: originalname,
-                fileUrl: urlData.publicUrl,
+                fileUrl: publicUrl,
                 storagePath,
                 extractedText,
             },
@@ -131,7 +132,7 @@ export const reExtract = async (req, res) => {
 
     let buffer;
     try {
-        buffer = await storageSrv.download(cv.storagePath);
+        buffer = await storageSrv.downloadCv(cv.storagePath);
     } catch (err) {
         return R.serverError(res, "Gagal mengunduh file CV");
     }
@@ -160,7 +161,7 @@ export const analyze = async (req, res) => {
     if (!cv) return R.notFound(res, "CV tidak ditemukan");
     if (cv.userId !== userId)
         return R.forbidden(res, "Akses ditolak");
-    if (!cv.extractedText || cv.extractedText.length < MIN_TEXT_LEN) {
+    if (!cv.extractedText || cv.extractedText.length < CV_MIN_TEXT_LEN) {
         return R.unprocessable(res, "Teks CV belum tersedia atau terlalu pendek", {
             hint: "Coba upload ulang atau gunakan POST /api/cv/:id/re-extract",
         });
@@ -194,7 +195,7 @@ export const analyze = async (req, res) => {
     } catch (err) {
         console.warn("[CV analyze] AI Service tidak tersedia:", err.message);
 
-        const fallback = skillGapSrv.computeFallBackGap(cv.extractedText.jobSkills)
+        const fallback = skillGapSrv.computeFallBackGap(cv.extractedText, jobSkills)
         aiResult = {
             matchScore:  fallback.matchScore,
             skillGap:    fallback.skillGapJson,

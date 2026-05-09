@@ -5,6 +5,10 @@ const ok = (res, data, message = null, status = 200) => {
     const payload = {};
     if (message) payload.message = message;
     if (data !== undefined) payload.data = data;
+
+    if (Array.isArray(data)) {
+        payload.total = data.length;
+    }
     return res.status(status).json(payload);
 };
 

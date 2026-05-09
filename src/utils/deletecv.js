@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import prisma from "../config/prisma.js";
-import supabase from "../config/supabase.js";
+import storageService from "../services/storageService.js";
 
 const BUCKET = "cv-uploads";
 
@@ -27,9 +27,7 @@ export const startAutoCleanUp = () => {
 
             for (const cv of expiredCvs) {
                 // 1. Hapus file PDF aslinya dari Supabase Storage (Cloud)
-                const { error } = await supabase.storage
-                    .from(BUCKET)
-                    .remove([cv.storagePath]);
+                const { error } = await storageService.deleteCv(cv.storagePath);
 
                 if (error) {
                     console.error(

@@ -10,6 +10,7 @@ const parsePagination = (
 ) => {
     const page = Math.max(DEFAULT_PAGE, parseInt(query.page) || DEFAULT_PAGE);
     const limit = Math.min(maxLimit, parseInt(query.limit) || defaultLimit);
+    const skip = (page - 1) * limit;
     return { page, limit, skip };
 };
 

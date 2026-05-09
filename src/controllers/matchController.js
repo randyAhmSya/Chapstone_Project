@@ -1,7 +1,7 @@
 import prisma from "../config/prisma.js";
 import R from "../utils/response.js";
 import { parsePagination, buildMeta } from "../utils/pagination.js"
-import { DEFAULT_MATCH_LIMIT,MAX_MATCH_LIMIT } from "../utils/constants.js"
+import { CV_MIN_TEXT_LEN, DEFAULT_MATCH_LIMIT,MAX_MATCH_LIMIT } from "../utils/constants.js"
 import pdfSvc from "../services/pdfServices.js"
 import aiSvc from "../services/aiServices.js"
 import skillGapSvc from "../services/skillGapServices.js"
@@ -16,7 +16,7 @@ export const run = async (req, res) => {
     if (!cv) return R.notFound(res, "CV tidak ditemukan");
     if (cv.userId !== userId)
         return R.forbidden(res, "Akses ditolak");
-    if (!cv.extractedText || cv.extractedText.length < MIN_TEXT_LEN) {
+    if (!cv.extractedText || cv.extractedText.length < CV_MIN_TEXT_LEN) {
         return R.unprocessable(res, {
             error: "Teks CV belum tersedia atau terlalu pendek",
             hint: "Gunakan POST /api/cv/:id/re-extract untuk mencoba ulang ekstraksi teks",
@@ -98,7 +98,7 @@ export const getOne = async (req, res) => {
         return R.notFound(res, "Hasil matching tidak ditemukan");
     if (result.userId !== req.user.id)
         return R.forbidden(res, "Akses ditolak");
-    return R.ok(res, { data: result });
+    return R.ok(res, result);
 };
 
 export const getHistory = async (req, res) => {

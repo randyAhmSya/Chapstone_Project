@@ -185,11 +185,11 @@ export const getStats = async (req, res) => {
     // Resolve nama skill & industri secara paralel
     const [skillNames, indNames] = await Promise.all([
         prisma.skill.findMany({
-        where:  { skillId: { in: topSkillsRaw.map(s => s.skillId) } },
+        where:  { skillId: { in: topSkills.map(s => s.skillId) } },
         select: { skillId: true, skillName: true },
         }),
         prisma.industry.findMany({
-        where:  { industryId: { in: topIndustriesRaw.map(i => i.industryId).filter(Boolean) } },
+        where:  { industryId: { in: topIndustries.map(i => i.industryId).filter(Boolean) } },
         select: { industryId: true, industryName: true },
         }),
     ])
@@ -204,12 +204,12 @@ export const getStats = async (req, res) => {
         remoteJobs,
         remotePercentage: totalJobs > 0 ? Math.round((remoteJobs / totalJobs) * 100) : 0,
         },
-        topSkills: topSkillsRaw.map(s => ({
+        topSkills: topSkills.map(s => ({
         skillId:   s.skillId,
         skillName: skillMap[s.skillId] || s.skillId,
         count:     s._count.skillId,
         })),
-        topIndustries: topIndustriesRaw.map(i => ({
+        topIndustries: topIndustries.map(i => ({
         industryId:   i.industryId,
         industryName: indMap[i.industryId] || String(i.industryId),
         count:        i._count.industryId,
