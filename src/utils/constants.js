@@ -6,6 +6,12 @@ const CV_MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB (juga diset di middleware/uplo
 // constatns AI service
 const AI_TIMEOUT_MS = 1500; // timeout request ke FastAPI (30 detik)
 
+//memory caching
+const jobDetailsCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000;
+
+const STATS_CACHE_DURATION = 5 * 60 * 1000;
+
 // constatns paginations
 const DEFAULT_PAGE = 1;
 const DEFAULT_JOB_LIMIT = 20;
@@ -25,4 +31,7 @@ export {
     DEFAULT_MATCH_LIMIT,
     MAX_MATCH_LIMIT,
     MAX_RECOMMENDATIONS,
+    jobDetailsCache,
+    CACHE_TTL,
+    STATS_CACHE_DURATION,
 };
