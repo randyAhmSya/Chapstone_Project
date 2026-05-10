@@ -5,6 +5,7 @@ import auth from "../middleware/auth.js";
 const router = express.Router();
 
 router.use(auth);
+router.post("/predict", ctrl.autoMatch)
 router.post("/", ctrl.run);
 router.get("/history", ctrl.getHistory);
 router.get("/:id", ctrl.getOne);
