@@ -4,7 +4,7 @@ const CV_BUCKET = "cv-uploads"; // nama bucket Supabase Storage
 const CV_MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB (juga diset di middleware/upload.js)
 
 // constatns AI service
-const AI_TIMEOUT_MS = 30_000; // timeout request ke FastAPI (30 detik)
+const AI_TIMEOUT_MS = 1500; // timeout request ke FastAPI (30 detik)
 
 // constatns paginations
 const DEFAULT_PAGE = 1;
