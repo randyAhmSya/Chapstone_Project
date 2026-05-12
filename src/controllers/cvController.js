@@ -5,6 +5,7 @@ import storageSrv from "../services/storageService.js";
 import skillGapSrv from "../services/skillGapServices.js"
 import aiServices from "../services/aiServices.js";
 import { CV_MIN_TEXT_LEN } from "../utils/constants.js";
+import recSrv from "../services/recommendationServices.js";
 
 export const upload = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file CV wajib diisi" });
@@ -82,15 +83,13 @@ export const getMine = async (req, res) => {
         },
     });
 
-    const data = cvs.map(cv => ({
+    return R.ok(res, cvs.map(cv => ({
         id: cv.id,
         fileName: cv.fileName,
         fileUrl: cv.fileUrl,
         uploadedAt: cv.uploadedAt,
         textExtracted: pdfsrv.isTextValid(cv.extractedText),
-    }))
-    
-    return R.ok(res, data);
+    })))
 };
 
 export const getOne = async (req, res) => {
@@ -123,7 +122,6 @@ export const remove = async (req, res) => {
 
 
 // POST /api/cv/:id/re-extract — coba ekstraksi ulang
-// jika pertama kali upload pdf-parse gagal
 export const reExtract = async (req, res) => {
     const cv = await prisma.cvUpload.findUnique({ where: { id: req.params.id } });
     if (!cv) return R.notFound(res, "CV tidak ditemukan");
@@ -172,6 +170,8 @@ export const analyze = async (req, res) => {
         where: { id: parseInt(jobPostingId) },
         include: {
             skills: { include: { skill: true } },
+            company: true,
+            salaries: true,
         },
     });
     if (!job)
@@ -181,38 +181,46 @@ export const analyze = async (req, res) => {
     const jobSkillIds = jobSkills.map(s => s.skillId)
 
     let aiResult;
-    let aiOnline = false;
+    let matchScore = 0, skillGap = null, suggestions = [], summary = ''
 
     try {
         const aiRaw = await aiServices.analyze(cv.extractedText, job, jobSkillIds)
         aiOnline = true;
-        aiResult = {
-            matchScore:  aiRaw.match_score  ?? 0,
-            skillGap:    aiRaw.skill_gap    ?? null,
-            suggestions: aiRaw.suggestions  ?? [],
-            summary:     aiRaw.summary      ?? null,
-        }
+        matchScore = aiRaw.match_score ?? 0
+        skillGap = aiRaw.skill_gap ?? null
+        suggestions = aiRaw.suggestions ?? []
+        summary = aiRaw.summary ?? null
     } catch (err) {
-        console.warn("[CV analyze] AI Service tidak tersedia:", err.message);
-
-        const fallback = skillGapSrv.computeFallBackGap(cv.extractedText, jobSkills)
-        aiResult = {
-            matchScore:  fallback.matchScore,
-            skillGap:    fallback.skillGapJson,
-            suggestions: fallback.suggestions,
-            summary:     fallback.summary,
-        }
+        console.warn('[CV Analyze] AI Service tidak tersedia:', err.message)
+        const fb  = skillGapSvc.computeFallbackGap(cv.extractedText, jobSkills)
+        matchScore  = fb.matchScore
+        skillGap    = fb.skillGapJson
+        suggestions = fb.suggestions
+        summary     = fb.summary
     }
 
-    res.json({
-        message: "analisis selesai",
-        aiOnline,
-        data: {
-            cvId:     cv.id,
-            jobId:    job.id,
-            jobTitle: job.title,
-            ...aiResult,
-        },
-    });
+    const missingSkillIds = skillGap?.missing || []
+    const radarChartData  = recSrv.buildRadarChartData(skillGap, jobSkills)
+    const learningPath    = recSrv.buildLearningPath(missingSkillIds, jobSkills)
+    const careerReadiness = recSrv.calcCareerReadiness(matchScore, skillGap)
+
+    return res.json({
+    message: 'Analisis selesai',
+    aiOnline,
+    data: {
+      cvId:           cv.id,
+      jobId:          job.id,
+      jobTitle:       job.title,
+      company:        job.company?.companyName || null,
+      matchScore,
+      careerReadiness,
+      summary,
+      skillGap,
+      suggestions,
+      radarChartData,
+      learningPath,
+    },
+  })
+
 };
 
