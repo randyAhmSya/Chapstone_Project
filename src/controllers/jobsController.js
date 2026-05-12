@@ -7,6 +7,9 @@ import {
     CACHE_TTL,
     jobDetailsCache,
     STATS_CACHE_DURATION,
+    SKILLS_TTL,
+    INDUSTRIES_TTL,
+    STATS_TTL,
 } from "../utils/constants.js";
 
 let cachedStats = null;
@@ -28,9 +31,7 @@ export const getAll = async (req, res) => {
         where.OR = [
             { title: { contains: search, mode: "insensitive" } },
             { company: { companyName: { contains: search, mode: "insensitive" } } },
-            // { title: { contains: search, mode: "insensitive" } },
-            // { description: { contains: search, mode: "insensitive" } },
-            // { skillsDesc: { contains: search, mode: "insensitive" } }
+            { skillsDesc: { contains: search, mode: "insensitive" } },
         ];
     }
     if (location) where.location = { contains: location, mode: "insensitive" };
@@ -113,9 +114,11 @@ export const getAll = async (req, res) => {
 };
 
 export const getSkills = async (req, res) => {
-    const skills = await prisma.skill.findMany({
-        orderBy: { skillName: "asc" },
-    });
+    const skills = await getOrSet(
+        "jobs:skills",
+        () => prisma.skill.findMany({ orderBy: { skillName: "asc" } }),
+        SKILLS_TTL,
+    );
     return R.ok(res, skills);
 };
 
@@ -261,7 +264,6 @@ export const getStats = async (req, res) => {
             }),
         ]);
 
-        // Resolve nama skill & industri secara paralel
         const [skillNames, indNames] = await Promise.all([
             prisma.skill.findMany({
                 where: { skillId: { in: topSkills.map((s) => s.skillId) } },
@@ -284,7 +286,6 @@ export const getStats = async (req, res) => {
             indNames.map((i) => [i.industryId, i.industryName]),
         );
 
-        // 3. FORMAT DATA DAN SIMPAN KE "LEMARI" CACHE
         cachedStats = {
             summary: {
                 totalJobs,
@@ -312,17 +313,10 @@ export const getStats = async (req, res) => {
                 count: w._count.formattedWorkType,
             })),
         };
-
-        // Catat waktu kapan cache ini diperbarui
         statsLastUpdated = Date.now();
-
-        // 4. KIRIM RESPONS
         return R.ok(res, cachedStats);
     } catch (error) {
         console.error("Error pada getStats:", error);
-
-        // Fitur Penyelamat: Kalau database tiba-tiba ngadat/error saat waktu update 5 menit tiba,
-        // kita tetap kirimkan data cache lama (kadaluarsa) daripada memberikan error ke frontend.
         if (cachedStats) {
             console.log(
                 "[CACHE FALLBACK] Database error, mengirim data statistik versi lama.",

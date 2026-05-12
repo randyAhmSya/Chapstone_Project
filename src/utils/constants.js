@@ -13,6 +13,7 @@ const AI_RETRY_DELAY_MS = 500;
 const jobDetailsCache = new Map();
 const CACHE_TTL = 10 * 60 * 1000;
 const STATS_CACHE_DURATION = 5 * 60 * 1000;
+const USER_TTL_MS = 5 * 60 * 1000;
 
 //matching dan rekomendasi
 const MATH_SCORE_THRESHOLD = 0.60;
@@ -27,6 +28,10 @@ const DEFAULT_MATCH_LIMIT = 10;
 const MAX_MATCH_LIMIT = 20;
 const MAX_RECOMMENDATIONS = 10;
 
+//jobs
+const SKILLS_TTL     = 10 * 60 * 1000
+const INDUSTRIES_TTL = 10 * 60 * 1000
+const STATS_TTL      = 15 * 60 * 1000
 export {
     CV_MIN_TEXT_LEN,
     CV_BUCKET,
@@ -41,10 +46,14 @@ export {
     jobDetailsCache,
     CACHE_TTL,
     STATS_CACHE_DURATION,
+    USER_TTL_MS,
     MATH_SCORE_THRESHOLD,
     TOP_JOBS_LIMIT,
     LEARNING_PATH_LIMIT,
     AI_RETRY_ATTEMPTS,
     AI_RETRY_DELAY_MS,
     AI_HEALTH_TIMEOUT_MS,
+    SKILLS_TTL,
+    INDUSTRIES_TTL,
+    STATS_TTL,
 };
