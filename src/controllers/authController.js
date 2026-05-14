@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
 import R from "../utils/response.js";
+import { cache } from "../utils/cache.js";
 // import { token } from "morgan";
 
 const makeToken = (userId) => {
@@ -59,35 +60,31 @@ export const register = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password)
-        return R.unauthorized(res, "email and password wajib diisi");
+  const { email, password } = req.body
 
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return R.unauthorized(res, "email atau password salah");
+  const user = await prisma.user.findUnique({ where: { email } })
 
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    if (!isPasswordValid) return R.unauthorized(res, "email atau password salah");
+  // Pesan identik — cegah user enumeration
+  if (!user) return R.unauthorized(res, 'Email atau password salah')
 
-    res.json({
-        message: "Login berhasil",
-        token: makeToken(user.id),
-        user: { id: user.id, email: user.email, name: user.name },
-    });
+  const ok = await bcrypt.compare(password, user.passwordHash)
+  if (!ok)  return R.unauthorized(res, 'Email atau password salah')
+
+  // Simpan ke cache setelah login berhasil — request berikutnya tidak perlu DB
+  cache.set(`user:${user.id}`, { id: user.id, email: user.email, name: user.name })
+
+  return res.json({
+    message: 'Login berhasil',
+    token:   makeToken(user.id),
+    user:    { id: user.id, email: user.email, name: user.name },
+  })
 };
 
 export const me = async (req, res) => {
-    const user = await prisma.user.findUnique({
-        where: { id: req.user.id },
-        select: {
-            id: true,
-            email: true,
-            name: true,
-            createdAt: true,
-            profile: true,
-        },
-    });
-    R.ok(res, user);
+  const profile = await prisma.userProfile.findUnique({
+    where: { userId: req.user.id },
+  })
+  return R.ok(res, { ...req.user, profile: profile || null })
 };
 
 export const changePassword = async (req, res) => {

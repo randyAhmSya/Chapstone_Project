@@ -13,7 +13,7 @@ class MemChache {
         return entry.value;
     }
 
-    set(key, value, ttlMs = DEFAULT_TTL_MS) {
+    set(key, value, ttlMs = STATS_CACHE_DURATION) {
         this._store.set(key, { value, expiresAt: Date.now() + ttlMs });
         return value;
     }
@@ -22,9 +22,9 @@ class MemChache {
     size() { return this._store.size; }
 }
 
-const cache = new MemChache();
+export const cache = new MemChache();
 
-const getOrSet = async (key, fn, ttlMs = STATS_CACHE_DURATION) => {
+export const getOrSet = async (key, fn, ttlMs = STATS_CACHE_DURATION) => {
     const hit = cache.get(key);
     if (hit !== null) return hit;
     const value = await fn();

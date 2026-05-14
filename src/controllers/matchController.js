@@ -9,6 +9,7 @@ import {
 import pdfSvc from "../services/pdfServices.js";
 import aiSvc from "../services/aiServices.js";
 import skillGapSvc from "../services/skillGapServices.js";
+import recSvc from "../services/recommendationsServices.js";
 
 // POST /api/match
 export const run = async (req, res) => {
@@ -23,25 +24,35 @@ export const run = async (req, res) => {
     const [cv, job] = await Promise.all([
         prisma.cvUpload.findUnique({ where: { id: cvUploadId } }),
         prisma.jobPosting.findUnique({
-        where:  { id: jobId },
-        select: {
-            id:                       true,
-            title:                    true,
-            description:           true,
-            skillsDesc:               true,
-            location:                 true,
-            remoteAllowed:            true,
-            formattedWorkType:        true,
-            formattedExperienceLevel: true,
-            company:    { select: { companyName: true } },
-            skills:     { select: { skill: { select: { skillId: true, skillName: true } } } },
-            salaries:   { select: { minSalary: true, maxSalary: true, currency: true, payPeriod: true } },
-            industries: { select: { industry: { select: { industryName: true } } } },
-        },
+            where: { id: jobId },
+            select: {
+                id: true,
+                title: true,
+                description: true,
+                skillsDesc: true,
+                location: true,
+                remoteAllowed: true,
+                formattedWorkType: true,
+                formattedExperienceLevel: true,
+                company: { select: { companyName: true } },
+                skills: {
+                    select: { skill: { select: { skillId: true, skillName: true } } },
+                },
+                salaries: {
+                    select: {
+                        minSalary: true,
+                        maxSalary: true,
+                        currency: true,
+                        payPeriod: true,
+                    },
+                },
+                industries: {
+                    select: { industry: { select: { industryName: true } } },
+                },
+            },
         }),
+    ]);
 
-    ])
-    
     if (!cv) return R.notFound(res, "CV tidak ditemukan");
     if (cv.userId !== userId) return R.forbidden(res, "Akses ditolak");
     if (!cv.extractedText || cv.extractedText.length < CV_MIN_TEXT_LEN) {
@@ -57,7 +68,11 @@ export const run = async (req, res) => {
     const jobSkillIds = jobSkills.map((s) => s.skillId);
 
     // Kirim ke AI Service
-    let matchScore = 0, skillGapJson = null, aiOnline = false, suggestions = [], summary = ''
+    let matchScore = 0,
+        skillGapJson = null,
+        aiOnline = false,
+        suggestions = [],
+        summary = "";
 
     try {
         const aiData = await aiSvc.predict(cv.extractedText, job, jobSkillIds);
@@ -65,74 +80,122 @@ export const run = async (req, res) => {
         skillGapJson = aiData.skill_gap ?? null;
         aiOnline = true;
         suggestions = aiData.suggestions ?? [];
-        summary = aiData.summary ?? '';
+        summary = aiData.summary ?? "";
     } catch (err) {
-        console.warn('[Match] fallback:', err.message)
-        const fb  = skillGapSvc.computeFallBackGap(cv.extractedText, jobSkills)
-        matchScore  = fb.matchScore; skillGapJson = fb.skillGapJson
-        suggestions = fb.suggestion; summary = fb.summary
+        console.warn("[Match] fallback:", err.message);
+        const fb = skillGapSvc.computeFallBackGap(cv.extractedText, jobSkills);
+        matchScore = fb.matchScore;
+        skillGapJson = fb.skillGapJson;
+        suggestions = fb.suggestion || [];
+        summary = fb.summary;
     }
     // Simpan hasil ke DB
     const [result] = await Promise.all([
         prisma.matchResult.create({
-            data:   { userId, cvUploadId, jobPostingId: jobId, matchScore, skillGapJson },
+            data: {
+                userId,
+                cvUploadId,
+                jobPostingId: jobId,
+                matchScore,
+                skillGapJson,
+            },
             select: { id: true },
         }),
-    ])
+    ]);
 
-    const missingSkillIds = skillGapJson?.missing || []
-    const radarChartData  = recSvc.buildRadarChartData(skillGapJson, jobSkills)
-    const learningPath    = recSvc.buildLearningPath(missingSkillIds, jobSkills)
-    const careerReadiness = recSvc.calcCareerReadiness(matchScore, skillGapJson)
+    const missingSkillIds = skillGapJson?.missing || [];
+    const radarChartData = recSvc.buildRadarChartData(skillGapJson, jobSkills);
+    const learningPath = recSvc.buildLearningPath(missingSkillIds, jobSkills);
+    const careerReadiness = recSvc.calcCareerReadiness(matchScore, skillGapJson);
 
     res.status(201).json({
         message: "Matching selesai",
         aiOnline,
         data: {
-            id:         job.id,
-            title:      job.title,
-            company:    job.company?.companyName || null,
-            location:   job.location             || null,
-            workType:   job.formattedWorkType    || null,
-            level:      job.formattedExperienceLevel || null,
-            remote:     (job.remoteAllowed || 0) > 0,
-            salary:     job.salaries?.[0]        || null,
-            industries: job.industries?.map(i => i.industry?.industryName).filter(Boolean) || [],
+            id: result.id,
+            jobPostingId: job.id,
+            title: job.title,
+            company: job.company?.companyName || null,
+            location: job.location || null,
+            workType: job.formattedWorkType || null,
+            level: job.formattedExperienceLevel || null,
+            remote: (job.remoteAllowed || 0) > 0,
+            salary: job.salaries?.[0] || null,
+            industries:
+                job.industries?.map((i) => i.industry?.industryName).filter(Boolean) ||
+                [],
+            matchScore,
+            skillGapJson,
+            suggestions,
+            summary,
+            careerReadiness,
+            radarChartData,
+            learningPath,
         },
     });
 };
 
-
 export const getOne = async (req, res) => {
-  const result = await prisma.matchResult.findUnique({
-    where:  { id: req.params.id },
-    select: {
-      id: true, userId: true, matchScore: true, skillGapJson: true, createdAt: true,
-      cvUpload:   { select: { id: true, fileName: true } },
-      jobPosting: {
+    const result = await prisma.matchResult.findUnique({
+        where: { id: req.params.id },
         select: {
-          id: true, title: true, jobDescription: true, location: true,
-          remoteAllowed: true, formattedWorkType: true, formattedExperienceLevel: true,
-          company:    { select: { companyName: true, city: true, country: true } },
-          skills:     { select: { skill: { select: { skillId: true, skillName: true } } } },
-          industries: { select: { industry: { select: { industryName: true } } } },
-          salaries:   { select: { minSalary: true, maxSalary: true, currency: true, payPeriod: true } },
-          benefits:   { select: { type: true } },
+            id: true,
+            userId: true,
+            matchScore: true,
+            skillGapJson: true,
+            createdAt: true,
+            cvUpload: { select: { id: true, fileName: true } },
+            jobPosting: {
+                select: {
+                    id: true,
+                    title: true,
+                    description: true,
+                    location: true,
+                    remoteAllowed: true,
+                    formattedWorkType: true,
+                    formattedExperienceLevel: true,
+                    company: { select: { companyName: true, city: true, country: true } },
+                    skills: {
+                        select: { skill: { select: { skillId: true, skillName: true } } },
+                    },
+                    industries: {
+                        select: { industry: { select: { industryName: true } } },
+                    },
+                    salaries: {
+                        select: {
+                            minSalary: true,
+                            maxSalary: true,
+                            currency: true,
+                            payPeriod: true,
+                        },
+                    },
+                    benefits: { select: { type: true } },
+                },
+            },
         },
-      },
-    },
-  })
+    });
 
-  if (!result)                       return R.notFound(res, 'Hasil matching tidak ditemukan')
-  if (result.userId !== req.user.id) return R.forbidden(res, 'Akses ditolak')
+    if (!result) return R.notFound(res, "Hasil matching tidak ditemukan");
+    if (result.userId !== req.user.id) return R.forbidden(res, "Akses ditolak");
 
-  const jobSkills       = skillGapSvc.extractJobSkills(result.jobPosting)
-  const radarChartData  = recSvc.buildRadarChartData(result.skillGapJson, jobSkills)
-  const missingSkillIds = result.skillGapJson?.missing || []
-  const learningPath    = recSvc.buildLearningPath(missingSkillIds, jobSkills)
-  const careerReadiness = recSvc.calcCareerReadiness(result.matchScore, result.skillGapJson)
+    const jobSkills = skillGapSvc.extractJobSkills(result.jobPosting);
+    const radarChartData = recSvc.buildRadarChartData(
+        result.skillGapJson,
+        jobSkills,
+    );
+    const missingSkillIds = result.skillGapJson?.missing || [];
+    const learningPath = recSvc.buildLearningPath(missingSkillIds, jobSkills);
+    const careerReadiness = recSvc.calcCareerReadiness(
+        result.matchScore,
+        result.skillGapJson,
+    );
 
-  return R.ok(res, { ...result, careerReadiness, radarChartData, learningPath })
+    return R.ok(res, {
+        ...result,
+        careerReadiness,
+        radarChartData,
+        learningPath,
+    });
 };
 
 // GET /api/match/history
@@ -149,98 +212,122 @@ export const getHistory = async (req, res) => {
             orderBy: { createdAt: "desc" },
             skip,
             take: limit,
+            // OPTIMASI: select minimal untuk list — skillGapJson tidak dibutuhkan di list
             select: {
-                id:           true,
-                matchScore:   true,
-                skillGapJson: true,   
-                createdAt:    true,
+                id: true,
+                matchScore: true,
+                skillGapJson: true, // dibutuhkan untuk calcCareerReadiness
+                createdAt: true,
                 jobPosting: {
                     select: {
-                        id:                       true,
-                        title:                    true,
-                        location:                 true,
-                        formattedWorkType:        true,
+                        id: true,
+                        title: true,
+                        location: true,
+                        formattedWorkType: true,
                         formattedExperienceLevel: true,
-                        remoteAllowed:            true,
-                        company:  { select: { companyName: true } },
-                        salaries: { select: { minSalary: true, maxSalary: true, currency: true }, take: 1 },
+                        remoteAllowed: true,
+                        company: { select: { companyName: true } },
+                        salaries: {
+                            select: { minSalary: true, maxSalary: true, currency: true },
+                            take: 1,
+                        },
                     },
                 },
                 cvUpload: { select: { id: true, fileName: true } },
             },
-
         }),
         prisma.matchResult.count({ where: { userId: req.user.id } }),
     ]);
 
-    const enriched = results.map(r => ({
+    const enriched = results.map((r) => ({
         ...r,
         careerReadiness: recSvc.calcCareerReadiness(r.matchScore, r.skillGapJson),
-    }))
+    }));
 
-    return R.paginated(res, enriched, buildMeta(total, page, limit))
+    return R.pagination(res, enriched, buildMeta(total, page, limit));
 };
 
-
 export const getDashboard = async (req, res) => {
-    const userId = req.user.id
+    const matchId = req.params.id;
 
-  const allResults = await prisma.matchResult.findMany({
-    where:   { userId },
-    orderBy: { matchScore: 'desc' },
-    take:    30,
-    select: {
-      id:           true,
-      matchScore:   true,
-      skillGapJson: true,
-      jobPosting: {
+    const allResults = await prisma.matchResult.findMany({
+        where: { id: matchId },
+        orderBy: { matchScore: "desc" },
+        take: 30,
         select: {
-          id:                       true,
-          title:                    true,
-          location:                 true,
-          remoteAllowed:            true,
-          formattedWorkType:        true,
-          formattedExperienceLevel: true,
-          company:  { select: { companyName: true } },
-          salaries: { select: { minSalary: true, maxSalary: true, currency: true, payPeriod: true }, take: 1 },
+            id: true,
+            matchScore: true,
+            skillGapJson: true,
+            jobPosting: {
+                select: {
+                    id: true,
+                    title: true,
+                    location: true,
+                    remoteAllowed: true,
+                    formattedWorkType: true,
+                    formattedExperienceLevel: true,
+                    company: { select: { companyName: true } },
+                    salaries: {
+                        select: {
+                            minSalary: true,
+                            maxSalary: true,
+                            currency: true,
+                            payPeriod: true,
+                        },
+                        take: 1,
+                    },
+                },
+            },
         },
-      },
-    },
-  })
+    });
 
-  if (!allResults.length) {
+    if (!allResults.length) {
+        return R.ok(res, {
+            hasData: false,
+            message:
+                "Belum ada riwayat matching. Upload CV dan jalankan matching terlebih dahulu.",
+            topJobs: [],
+            averageScore: 0,
+            totalMatched: 0,
+            bestMatch: null,
+        });
+    }
+
+    const totalMatched = allResults.length;
+    const averageScore = parseFloat(
+        (
+            allResults.reduce((sum, r) => sum + r.matchScore, 0) / totalMatched
+        ).toFixed(2),
+    );
+    const bestMatch = allResults[0];
+    const topJobs = recSvc.getTopJobRecommendations(allResults);
+
+    const jobSkills = bestMatch
+        ? skillGapSvc.extractJobSkills(bestMatch.jobPosting)
+        : [];
+    const radarData = bestMatch
+        ? recSvc.buildRadarChartData(bestMatch.skillGapJson, jobSkills)
+        : [];
+
     return R.ok(res, {
-      hasData: false,
-      message: 'Belum ada riwayat matching. Upload CV dan jalankan matching terlebih dahulu.',
-      topJobs: [], averageScore: 0, totalMatched: 0, bestMatch: null,
-    })
-  }
-
-  const totalMatched = allResults.length
-  const averageScore = parseFloat(
-    (allResults.reduce((sum, r) => sum + r.matchScore, 0) / totalMatched).toFixed(2)
-  )
-  const bestMatch    = allResults[0]
-  const topJobs      = recSvc.getTopJobRecommendations(allResults)
-
-  const jobSkills  = bestMatch ? skillGapSvc.extractJobSkills(bestMatch.jobPosting) : []
-  const radarData  = bestMatch ? recSvc.buildRadarChartData(bestMatch.skillGapJson, jobSkills) : []
-
-  return R.ok(res, {
-    hasData: true, totalMatched, averageScore,
-    careerReadiness: recSvc.calcCareerReadiness(bestMatch.matchScore, bestMatch.skillGapJson),
-    bestMatch: {
-      matchResultId: bestMatch.id,
-      matchScore:    bestMatch.matchScore,
-      jobTitle:      bestMatch.jobPosting.title,
-      company:       bestMatch.jobPosting.company?.companyName || null,
-      radarChartData: radarData,
-      skillGap:      bestMatch.skillGapJson,
-    },
-    topJobs,
-  })
-
-}
+        hasData: true,
+        totalMatched,
+        averageScore,
+        careerReadiness: recSvc.calcCareerReadiness(
+            bestMatch.matchScore,
+            bestMatch.skillGapJson,
+        ),
+        bestMatch: {
+            matchResultId: bestMatch.id,
+            matchScore: bestMatch.matchScore,
+            jobTitle: bestMatch.jobPosting.title,
+            company: bestMatch.jobPosting.company?.companyName || null,
+            radarChartData: radarData,
+            skillGap: bestMatch.skillGapJson,
+        },
+        topJobs,
+    });
+};
 
 export const autoMatch = async (req, res) => {
     const { cvUploadId } = req.body;
@@ -248,7 +335,7 @@ export const autoMatch = async (req, res) => {
 
     const [cv, allskill] = await Promise.all([
         prisma.cvUpload.findUnique({ where: { id: cvUploadId } }),
-        prisma.skill.findMany()
+        prisma.skill.findMany(),
     ]);
 
     if (!cv) return R.notFound(res, "cv tidak di temukan");
@@ -362,10 +449,12 @@ export const autoMatch = async (req, res) => {
     }));
 
     await prisma.matchResult.createMany({
-        data: matchDataToInsert
+        data: matchDataToInsert,
     });
 
-    const recommendations = recommendationsRaw.map(({ rawJobId, ...rest }) => rest);
+    const recommendations = recommendationsRaw.map(
+        ({ rawJobId, ...rest }) => rest,
+    );
 
     recommendations.sort((a, b) => b.matchScore - a.matchScore);
 

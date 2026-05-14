@@ -2,8 +2,12 @@ import prisma from "../config/prisma.js";
 import R from "../utils/response.js";
 import { MAX_RECOMMENDATIONS } from "../utils/constants.js";
 import pdfSvc from "../services/pdfServices.js";
+import cache from "../utils/cache.js";
 
-const RECOMMENDATION_INCLUDE = {
+const REC_SELECT = {
+  id: true,
+  matchScore: true,
+  createdAt: true,
   jobPosting: {
     select: {
       id: true,
@@ -12,21 +16,10 @@ const RECOMMENDATION_INCLUDE = {
       remoteAllowed: true,
       formattedWorkType: true,
       formattedExperienceLevel: true,
-      company: {
-        select: { companyName: true, city: true, country: true },
-      },
-      skills: {
-        include: {
-          skill: { select: { skillId: true, skillName: true } },
-        },
-      },
+      company: { select: { companyName: true } },
       salaries: {
-        select: {
-          minSalary: true,
-          maxSalary: true,
-          payPeriod: true,
-          currency: true,
-        },
+        select: { minSalary: true, maxSalary: true, currency: true },
+        take: 1,
       },
     },
   },
@@ -59,7 +52,7 @@ export const getRecommendations = async (req, res) => {
     where: { userId: req.user.id },
     orderBy: { matchScore: "desc" },
     take: MAX_RECOMMENDATIONS,
-    include: RECOMMENDATION_INCLUDE,
+    select: REC_SELECT,
   });
   return R.ok(res, result);
 };
@@ -68,9 +61,7 @@ export const getRecommendations = async (req, res) => {
 export const getCvsByUserId = async (req, res) => {
   const { userId } = req.params;
 
-  if (userId !== req.user.id) 
-    return R.forbidden(res, "Akses ditolak");
-  
+  if (userId !== req.user.id) return R.forbidden(res, "Akses ditolak");
 
   const cvs = await prisma.cvUpload.findMany({
     where: { userId },
@@ -84,29 +75,29 @@ export const getCvsByUserId = async (req, res) => {
     },
   });
 
-  const result = cvs.map(cv => ({
-    id: cv.id,
-    fileName: cv.fileName,
-    fileUrl: cv.fileUrl,
-    uploadedAt: cv.uploadedAt,
-    textExtracted: pdfSvc.isTextValid(cv.extractedText),
-  }));
-
-  return R.ok(res, result);
+  return R.ok(
+    res,
+    cvs.map((cv) => ({
+      id: cv.id,
+      fileName: cv.fileName,
+      fileUrl: cv.fileUrl,
+      uploadedAt: cv.uploadedAt,
+      textExtracted: pdfSvc.isTextValid(cv.extractedText),
+    })),
+  );
 };
 
 //GET /api/users/:userId/recommendations
 export const getRecommendationsById = async (req, res) => {
   const { userId } = req.params;
 
-  if (userId !== req.user.id)
-    return R.forbidden(res, "Akses ditolak");
+  if (userId !== req.user.id) return R.forbidden(res, "Akses ditolak");
 
   const results = await prisma.matchResult.findMany({
     where: { userId: req.user.id },
     orderBy: { matchScore: "desc" },
     take: MAX_RECOMMENDATIONS,
-    include: RECOMMENDATION_INCLUDE,
+    select: REC_SELECT,
   });
 
   return R.ok(res, results);
@@ -116,5 +107,6 @@ export const deleteAcount = async (req, res) => {
   await prisma.user.delete({
     where: { id: req.user.id },
   });
+  cache.del(`user:${req.user.id}`);
   return R.ok(res, null, "Akun berhasil dihapus");
 };

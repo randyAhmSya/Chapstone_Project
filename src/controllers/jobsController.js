@@ -4,17 +4,11 @@ import { parsePagination, buildMeta } from "../utils/pagination.js";
 import {
     DEFAULT_JOB_LIMIT,
     MAX_JOB_LIMIT,
-    CACHE_TTL,
-    jobDetailsCache,
-    STATS_CACHE_DURATION,
     SKILLS_TTL,
     INDUSTRIES_TTL,
     STATS_TTL,
 } from "../utils/constants.js";
 import { getOrSet } from "../utils/cache.js";
-
-let cachedStats = null;
-let statsLastUpdated = null;
 
 export const getAll = async (req, res) => {
     const { page, limit, skip } = parsePagination(
@@ -153,20 +147,28 @@ export const getOne = async (req, res) => {
     const job = await prisma.jobPosting.findUnique({
     where:  { id },
     select: {
-      id:                       true,
-      title:                    true,
-      jobDescription:           true,
-      skillsDesc:               true,
-      location:                 true,
-      remoteAllowed:            true,
-      formattedWorkType:        true,
+      id: true,
+      title: true,
+      description: true,
+      skillsDesc: true,
+      location: true,
+      remoteAllowed: true,
+      formattedWorkType: true,
       formattedExperienceLevel: true,
-      applies:                  true,
-      listedTime:               true,
-      sponsored:                true,
+      applies: true,
+      listedTime: true,
+      sponsored: true,
       company: {
         select: { companyName: true, city: true, country: true, companySize: true,
-                  employeeCount: true, followerCount: true, companyUrl: true },
+                  employeeCounts: {
+          select: {
+            employeeCount: true,
+            followerCount: true,
+            timeRecorded: true
+          },
+          orderBy: { timeRecorded: 'desc' },
+          take: 1
+        }, url: true },
       },
       skills:     { select: { skill: { select: { skillId: true, skillName: true } } } },
       industries: { select: { industry: { select: { industryId: true, industryName: true } } } },

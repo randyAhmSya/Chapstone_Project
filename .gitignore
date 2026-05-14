@@ -2,7 +2,11 @@
 .env
 *.env
 !.env.example
- 
+
+# Testing Reports
+coverage/
+.jest/
+
 # Node
 node_modules/
 dist/
